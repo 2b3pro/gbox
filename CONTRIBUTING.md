@@ -1,10 +1,10 @@
-# Contributing Tools to gbox (gb)
+# Contributing Tools to gbox
 
-Adding new capabilities to `gbox (gb)` is straightforward. The project uses a modular architecture where tools are defined in specialized modules and registered in a central aggregator.
+Adding new capabilities to `gbox` is straightforward. The project uses a modular architecture where tools are defined in specialized modules and registered in a central aggregator.
 
 ## The Tool Registry
 
-There isn't a complex internal registry; instead, `gbox (gb)` looks at the `tools` list and `tool_sets` dictionary defined in `preset.py`. 
+There isn't a complex internal registry; instead, `gbox` looks at the `tools` list and `tool_sets` dictionary defined in `preset.py`. 
 
 1.  **Individual Tools**: Functions defined in the `tools/` directory.
 2.  **Aggregation**: `preset.py` imports these functions and adds them to a master `tools` list.
@@ -44,7 +44,7 @@ tools = [calculate_power]
 If you created a new file, ensure you export a `tools` list at the bottom of that file (as shown above).
 
 ### 3. Update `preset.py`
-Add your new module or function to `preset.py` so `gbox (gb)` can find it.
+Add your new module or function to `preset.py` so `gbox` can find it.
 
 ```python
 # preset.py
@@ -66,7 +66,7 @@ tool_sets = {
 ```
 
 ### 4. Categorize (Optional)
-If your tool is complex and requires significant "reasoning" or "cognition," add its function name to the `HIGH_COGNITION_TOOLS` set at the top of the `gbox (gb)` script. This will trigger the smart recommendation for users to use the `--high` (4B) model.
+If your tool is complex and requires significant "reasoning" or "cognition," add its function name to the `HIGH_COGNITION_TOOLS` set at the top of the `gbox` script. This will trigger the smart recommendation for users to use the `--high` (4B) model.
 
 ---
 

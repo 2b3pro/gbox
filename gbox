@@ -27,6 +27,7 @@ import argparse
 import platform
 import litert_lm
 import tempfile
+import datetime
 from contextlib import contextmanager
 
 @contextmanager
@@ -209,8 +210,156 @@ def manage_session_window(messages, limit=3500):
     
     return new_messages
 
+def run_server(args, engine, tools, system_msg):
+    from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+    import json
+    import time
+    import uuid
+
+    class InferenceHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            if self.path in ("/", "/infer", "/v1/chat/completions"):
+                content_length = int(self.headers.get("Content-Length", 0))
+                post_data = self.rfile.read(content_length)
+                try:
+                    req_data = json.loads(post_data)
+                except Exception:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"Invalid JSON")
+                    return
+                
+                messages = req_data.get("messages", [])
+                if not messages:
+                    # Support for simple prompt field if messages missing
+                    prompt = req_data.get("prompt")
+                    if prompt:
+                        messages = [{"role": "user", "content": prompt}]
+                    else:
+                        self.send_response(400)
+                        self.end_headers()
+                        self.wfile.write(b"No messages or prompt provided")
+                        return
+                
+                context_msgs = messages[:-1] if len(messages) > 1 else []
+                last_msg = messages[-1]
+                
+                final_context = []
+                has_system = any(m.get("role") == "system" for m in messages)
+                if system_msg and not has_system:
+                    final_context.append({"role": "system", "content": [{"type": "text", "text": system_msg}]})
+                
+                for msg in context_msgs:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        content = [{"type": "text", "text": content}]
+                    final_context.append({"role": role, "content": content})
+                
+                user_content = last_msg.get("content", "")
+                if isinstance(user_content, str):
+                    user_content_list = [{"type": "text", "text": user_content}]
+                else:
+                    user_content_list = user_content
+                
+                message_obj = {"role": last_msg.get("role", "user"), "content": user_content_list}
+
+                try:
+                    is_stream = req_data.get("stream", False)
+                    request_id = f"chatcmpl-{uuid.uuid4()}"
+                    created_time = int(time.time())
+                    model_name = req_data.get("model", args.model_or_prompt or "gbox-model")
+
+                    with engine.create_conversation(tools=tools, messages=final_context) as conv:
+                        if is_stream:
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/event-stream")
+                            self.send_header("Cache-Control", "no-cache")
+                            self.send_header("Connection", "keep-alive")
+                            self.end_headers()
+                            
+                            stream = conv.send_message_async(message_obj)
+                            for chunk in stream:
+                                chunk_text = "".join([part.get("text", "") for part in chunk.get("content", []) if part.get("type") == "text"])
+                                if not chunk_text: continue
+                                
+                                resp_chunk = {
+                                    "id": request_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_time,
+                                    "model": model_name,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {"content": chunk_text},
+                                        "finish_reason": None
+                                    }]
+                                }
+                                self.wfile.write(f"data: {json.dumps(resp_chunk)}\n\n".encode("utf-8"))
+                                self.wfile.flush()
+                            
+                            final_resp_chunk = {
+                                "id": request_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model_name,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {},
+                                    "finish_reason": "stop"
+                                }]
+                            }
+                            self.wfile.write(f"data: {json.dumps(final_resp_chunk)}\n\n".encode("utf-8"))
+                            self.wfile.write(b"data: [DONE]\n\n")
+                            self.wfile.flush()
+                        else:
+                            response = conv.send_message(message_obj)
+                            raw_text = "".join([part.get("text", "") for part in response.get("content", []) if part.get("type") == "text"])
+                            
+                            resp_data = {
+                                "id": request_id,
+                                "object": "chat.completion",
+                                "created": created_time,
+                                "model": model_name,
+                                "choices": [{
+                                    "index": 0,
+                                    "message": {"role": "assistant", "content": raw_text},
+                                    "finish_reason": "stop"
+                                }],
+                                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                            }
+                            
+                            resp_json = json.dumps(resp_data).encode("utf-8")
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(resp_json)))
+                            self.end_headers()
+                            self.wfile.write(resp_json)
+                except Exception as e:
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            else:
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b"Not Found")
+
+    if getattr(args, "_internal_run", False):
+        server_dir = os.path.expanduser("~/.gbox")
+        os.makedirs(server_dir, exist_ok=True)
+        with open(os.path.join(server_dir, "server.pid"), "w") as f:
+            f.write(str(os.getpid()))
+
+    server = ThreadingHTTPServer(("0.0.0.0", args.port), InferenceHandler)
+    print(f"Starting gbox inference server on http://0.0.0.0:{args.port}")
+    print(f"Endpoints: /infer, /v1/chat/completions")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopping server...")
+        server.server_close()
+
 def main():
-    parser = argparse.ArgumentParser(description="gbox (gb) - Quick inference tool for LiteRT-LM")
+    parser = argparse.ArgumentParser(description="gbox - Quick inference tool for LiteRT-LM")
     parser.add_argument("model_or_prompt", nargs="?", help="Model ID, path, or the prompt itself")
     parser.add_argument("prompt_parts", nargs="*", help="Remaining parts of the prompt if first arg was a model")
     parser.add_argument("--default", action="store_true", help="Use gemma-4-E2B-it model (default)")
@@ -230,12 +379,87 @@ def main():
 
     parser.add_argument("--json", action="store_true", help="Output strict JSON")
     parser.add_argument("--stream", action="store_true", help="Stream the response in real-time")
+    parser.add_argument("--server", nargs="?", const="start", choices=["start", "stop", "status", "logs"], help="Server control: start, stop, status, logs")
+    parser.add_argument("--_internal_run", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--port", type=int, default=8088, help="Server port (default: 8088)")
     parser.add_argument("--backend", default=default_backend, choices=["cpu", "gpu"])
     parser.add_argument("--vision-backend", default=default_backend, choices=["cpu", "gpu"])
     parser.add_argument("--audio-backend", default="cpu", choices=["cpu", "gpu"])
     parser.add_argument("--max-tokens", type=int, default=4096, help="KV cache size")
-    parser.add_argument("--version", action="version", version="gbox 0.1.0 (litert-lm 0.10.1)")
+    parser.add_argument("--version", action="version", version="gbox 0.2.0 (litert-lm 0.10.1)")
     args = parser.parse_args()
+
+    # Server control logic
+    if args.server and not args._internal_run:
+        server_dir = os.path.expanduser("~/.gbox")
+        pid_file = os.path.join(server_dir, "server.pid")
+        log_file = os.path.join(server_dir, "server.log")
+        
+        if args.server == "status":
+            if os.path.exists(pid_file):
+                with open(pid_file, "r") as f:
+                    pid = int(f.read().strip())
+                try:
+                    os.kill(pid, 0)
+                    print(f"Server is running (PID: {pid}).")
+                    sys.exit(0)
+                except ProcessLookupError:
+                    print("Server is NOT running (stale PID file).")
+                    os.remove(pid_file)
+                    sys.exit(1)
+            print("Server is NOT running.")
+            sys.exit(1)
+            
+        elif args.server == "stop":
+            if os.path.exists(pid_file):
+                with open(pid_file, "r") as f:
+                    pid = int(f.read().strip())
+                try:
+                    os.kill(pid, 15)
+                    print(f"Stopped server (PID: {pid}).")
+                except ProcessLookupError:
+                    print("Server was not running.")
+                if os.path.exists(pid_file):
+                    os.remove(pid_file)
+                sys.exit(0)
+            print("Server is not running.")
+            sys.exit(0)
+            
+        elif args.server == "logs":
+            if os.path.exists(log_file):
+                with open(log_file, "r") as f:
+                    print(f.read())
+                sys.exit(0)
+            print("No log file found.")
+            sys.exit(1)
+            
+        elif args.server == "start":
+            if os.path.exists(pid_file):
+                with open(pid_file, "r") as f:
+                    pid = int(f.read().strip())
+                try:
+                    os.kill(pid, 0)
+                    print(f"Server is already running (PID: {pid}).")
+                    sys.exit(0)
+                except ProcessLookupError:
+                    os.remove(pid_file)
+            
+            os.makedirs(server_dir, exist_ok=True)
+            # Daemonize
+            import subprocess
+            cmd = [sys.executable, os.path.abspath(__file__)]
+            # Forward all relevant args but add _internal_run
+            new_args = sys.argv[1:]
+            if "--server" not in new_args:
+                new_args.extend(["--server", "start"])
+            new_args.append("--_internal_run")
+            
+            with open(log_file, "a") as log:
+                log.write(f"\n--- Server Starting at {datetime.datetime.now()} ---\n")
+                subprocess.Popen(cmd + new_args, stdout=log, stderr=log, start_new_session=True)
+            
+            print(f"Server started in background. Logs: {log_file}")
+            sys.exit(0)
 
     # Model and Prompt Resolution Logic
     selected_model = "gemma-4-E2B-it" # Default
@@ -350,7 +574,7 @@ def main():
         if image_path: full_prompt = "Describe this image."
         elif audio_path: full_prompt = "Describe this audio."
 
-    if not full_prompt and not image_path and not audio_path and not messages:
+    if not full_prompt and not image_path and not audio_path and not messages and not args.server:
         print("Error: No input provided.", file=sys.stderr)
         sys.exit(1)
 
@@ -390,6 +614,11 @@ def main():
                 max_num_tokens=args.max_tokens,
                 cache_dir=os.path.dirname(model_path)
             )        
+        
+        if args.server:
+            run_server(args, engine, tools, system_msg)
+            return
+
         final_messages = []
         if system_msg:
             final_messages.append({"role": "system", "content": [{"type": "text", "text": system_msg}]})

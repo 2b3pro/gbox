@@ -1,4 +1,4 @@
-# gbox (gb) - LiteRT-LM Inference Tool
+# gbox - LiteRT-LM Inference Tool
 
 ![gbox Banner](assets/banner.png)
 
@@ -35,16 +35,16 @@ You can provide the prompt via the `--prompt` flag or as a positional argument.
 
 ```bash
 # Positional (concise)
-./gb "What is the capital of France?"
+gbox "What is the capital of France?"
 
 # Using the flag
-./gb --prompt "Hi there!"
+gbox --prompt "Hi there!"
 
 # Using a file as a prompt
-./gb --prompt instructions.txt
+gbox --prompt instructions.txt
 
 # With real-time streaming
-./gb --stream "Write a long poem"
+gbox --stream "Write a long poem"
 ```
 
 ### Multimodal (Image & Audio)
@@ -52,10 +52,10 @@ If no prompt is provided with an image or audio, a default one like "Describe th
 
 ```bash
 # Implicit prompt
-./gb --image photo.jpg
+gbox --image photo.jpg
 
 # Explicit prompt
-./gb --audio clip.wav --prompt "Transcribe this audio"
+gbox --audio clip.wav --prompt "Transcribe this audio"
 ```
 
 ### macOS Power Features
@@ -63,26 +63,26 @@ The `mac` tool set allows deep integration with macOS.
 
 ```bash
 # Analyze a selection of your screen (triggers crosshair)
-./gb --tools mac "Analyze the part of my screen I'm about to select"
+gbox --tools mac "Analyze the part of my screen I'm about to select"
 
 # Finder integration
-./gb --tools mac "Summarize the files I have currently selected in Finder"
+gbox --tools mac "Summarize the files I have currently selected in Finder"
 
 # Web Browser context
-./gb --tools mac "What is the URL of the site I'm looking at?"
+gbox --tools mac "What is the URL of the site I'm looking at?"
 
 # System control
-./gb --tools mac "Switch to dark mode and say 'Good evening'"
+gbox --tools mac "Switch to dark mode and say 'Good evening'"
 ```
 
 ### Model Selection
 The tool defaults to `gemma-4-E2B-it`.
 ```bash
 # Use the 4B model (Higher reasoning)
-./gb --high --prompt "Explain quantum decoherence."
+gbox --high --prompt "Explain quantum decoherence."
 
 # Explicitly use the 2B model
-./gb --default --prompt "Who are you?"
+gbox --default --prompt "Who are you?"
 ```
 
 ### Selective Tools
@@ -90,7 +90,7 @@ Enable only the tools required for the task. The tool will suggest `--high` if c
 
 ```bash
 # Enable specific tools and sets
-./gb --presets preset.py --tools "calculator,fs" --prompt "Find data.csv and calculate the mean"
+gbox --presets preset.py --tools "calculator,fs" --prompt "Find data.csv and calculate the mean"
 ```
 
 ### Context and History
@@ -98,10 +98,10 @@ Inject prior context or full conversation history.
 
 ```bash
 # Use a Markdown file as prior context
-./gb --context context.md --prompt "Explain based on above"
+gbox --context context.md --prompt "Explain based on above"
 
 # Use a JSONL file for full message history
-./gb --context history.jsonl --prompt "Continue our chat"
+gbox --context history.jsonl --prompt "Continue our chat"
 ```
 
 **Available Sets in `preset.py`:**
@@ -119,7 +119,46 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a guide on adding your own tools.
 ### Structured JSON Output
 ```bash
 # schema.json: {"type":"object", "properties": {"sentiment": {"type":"string"}}}
-echo "I love this tool!" | ./gb --schema schema.json --json
+echo "I love this tool!" | gbox --schema schema.json --json
+```
+
+## Server Mode
+
+gbox can run as a background service to keep the model "warm," significantly reducing the latency of subsequent requests by avoiding repeated model loading.
+
+### Control Subcommands
+- **Start**: `gbox --server start` (or simply `gbox --server`) - Daemonizes the process.
+- **Stop**: `gbox --server stop` - Terminates the background process.
+- **Status**: `gbox --server status` - Checks if the server is running.
+- **Logs**: `gbox --server logs` - Tails the server output from `~/.gbox/server.log`.
+
+### API Usage
+The server listens on port **8088** by default and provides OpenAI-compatible endpoints:
+- `POST /v1/chat/completions`
+- `POST /infer`
+
+#### Sample JSON Request (Non-Streaming)
+```bash
+curl http://localhost:8088/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma-4-E2B-it",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "Explain gravity in one sentence."}
+    ],
+    "stream": false
+  }'
+```
+
+#### Sample JSON Request (Streaming)
+```bash
+curl http://localhost:8088/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "Count to 5 slowly."}],
+    "stream": true
+  }'
 ```
 
 ## Options
@@ -134,6 +173,8 @@ echo "I love this tool!" | ./gb --schema schema.json --json
 | `--context` | Path to JSONL (history) or Markdown (text) file. |
 | `--json` | Output strict JSON (cleans markdown filler). |
 | `--stream` | Stream the response in real-time. |
+| `--server` | Server control: `start`, `stop`, `status`, `logs`. |
+| `--port` | Port for the inference server (default: 8088). |
 | `--tools` | Comma-separated list of tools or sets. |
 | `--presets` | Path to your `preset.py` file. |
 | `--default` | Force `gemma-4-E2B-it`. |
