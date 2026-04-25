@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+default.profraw
+*.litertlm
+*.litertlm.xnnpack_cache
+*.bin
+
+# Temporary files
+/tmp/record-*
+/tmp/screenshot-*
