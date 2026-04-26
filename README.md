@@ -133,13 +133,13 @@ gbox can run as a background service to keep the model "warm," significantly red
 - **Logs**: `gbox --server logs` - Tails the server output from `~/.gbox/server.log`.
 
 ### API Usage
-The server listens on port **8088** by default and provides OpenAI-compatible endpoints:
+The server listens on port **8955** by default and provides OpenAI-compatible endpoints:
 - `POST /v1/chat/completions`
 - `POST /infer`
 
 #### Sample JSON Request (Non-Streaming)
 ```bash
-curl http://localhost:8088/v1/chat/completions \
+curl http://localhost:8955/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gemma-4-E2B-it",
@@ -153,7 +153,7 @@ curl http://localhost:8088/v1/chat/completions \
 
 #### Sample JSON Request (Streaming)
 ```bash
-curl http://localhost:8088/v1/chat/completions \
+curl http://localhost:8955/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": "Count to 5 slowly."}],
@@ -174,7 +174,7 @@ curl http://localhost:8088/v1/chat/completions \
 | `--json` | Output strict JSON (cleans markdown filler). |
 | `--stream` | Stream the response in real-time. |
 | `--server` | Server control: `start`, `stop`, `status`, `logs`. |
-| `--port` | Port for the inference server (default: 8088). |
+| `--port` | Port for the inference server (default: 8955). |
 | `--tools` | Comma-separated list of tools or sets. |
 | `--presets` | Path to your `preset.py` file. |
 | `--default` | Force `gemma-4-E2B-it`. |
