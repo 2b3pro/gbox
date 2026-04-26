@@ -28,6 +28,8 @@ import platform
 import litert_lm
 import tempfile
 import datetime
+import urllib.request
+import urllib.error
 from contextlib import contextmanager
 
 @contextmanager
@@ -126,27 +128,39 @@ def resolve_model_path(model_ref):
     return model_ref
 
 def get_available_models():
-    """Returns a list of available models by scanning storage paths."""
+    """Returns a list of available models by scanning LiteRT-LM storage paths.
+
+    A model is either a `.litertlm` file in a storage path, or a subdirectory
+    that itself contains a `.litertlm` file. CWD is intentionally excluded —
+    it caused the server to surface filesystem root entries when launched from /.
+    """
     storage_paths = [
-        os.getcwd(),
         os.path.expanduser("~/.litert-lm/models"),
         os.path.expanduser("~/.config/litert-lm/models"),
     ]
     env_path = os.getenv("LITERT_LM_MODELS_DIR")
     if env_path:
         storage_paths.insert(0, os.path.expanduser(env_path))
-    
+
     models = set(["gemma-4-E2B-it", "gemma-4-E4B-it"])
     for base in storage_paths:
-        if os.path.exists(base):
-            try:
-                for item in os.listdir(base):
-                    if item.endswith(".litertlm"):
-                        models.add(item[:-9])
-                    elif os.path.isdir(os.path.join(base, item)) and not item.startswith("."):
-                        models.add(item)
-            except Exception:
-                continue
+        if not os.path.isdir(base):
+            continue
+        try:
+            for item in os.listdir(base):
+                if item.startswith("."):
+                    continue
+                full = os.path.join(base, item)
+                if os.path.isfile(full) and item.endswith(".litertlm"):
+                    models.add(item[:-len(".litertlm")])
+                elif os.path.isdir(full):
+                    try:
+                        if any(child.endswith(".litertlm") for child in os.listdir(full)):
+                            models.add(item)
+                    except Exception:
+                        continue
+        except Exception:
+            continue
     return sorted(list(models))
 
 def resolve_fabric_resource(resource_type, name):
@@ -234,7 +248,7 @@ def manage_session_window(messages, limit=3500):
     
     return new_messages
 
-def run_server(args, engine, tools, system_msg):
+def run_server(args, engine, selected_model, tools, system_msg):
     from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
     import json
     import time
@@ -250,6 +264,18 @@ def run_server(args, engine, tools, system_msg):
                         {"id": m, "object": "model", "created": 1686935002, "owned_by": "gbox"}
                         for m in models
                     ]
+                }
+                resp_json = json.dumps(data).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp_json)))
+                self.end_headers()
+                self.wfile.write(resp_json)
+            elif self.path == "/config":
+                data = {
+                    "model": selected_model,
+                    "tools": [t.__name__ for t in tools],
+                    "max_tokens": args.max_tokens
                 }
                 resp_json = json.dumps(data).encode("utf-8")
                 self.send_response(200)
@@ -403,6 +429,95 @@ def run_server(args, engine, tools, system_msg):
         print("\nStopping server...")
         server.server_close()
 
+def try_forward_to_server(args, selected_model, tools, messages, system_msg, context_text, full_prompt, image_path, audio_path):
+    """Attempts to forward the request to a running gbox server if compatible."""
+    if args.no_server or args.server:
+        return False
+
+    url = f"http://localhost:{args.port}/config"
+    try:
+        with urllib.request.urlopen(url, timeout=0.5) as resp:
+            config = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, ConnectionRefusedError):
+        return False
+    except Exception:
+        return False
+
+    # Compatibility check
+    if config.get("model") != selected_model:
+        return False
+    
+    server_tools = set(config.get("tools", []))
+    required_tools = set(t.__name__ for t in tools)
+    if not required_tools.issubset(server_tools):
+        # Server is missing some tools we need
+        return False
+
+    # If we get here, the server is compatible. Forward the prompt.
+    print(f"[Info] Diverting to running server ({selected_model})...", file=sys.stderr)
+    
+    # Construct the payload
+    content_list = []
+    if context_text: content_list.append({"type": "text", "text": f"Prior Context:\n{context_text}\n\n---\n"})
+    if full_prompt: content_list.append({"type": "text", "text": full_prompt})
+    if image_path: content_list.append({"type": "image", "path": os.path.abspath(os.path.expanduser(image_path))})
+    if audio_path: content_list.append({"type": "audio", "path": os.path.abspath(os.path.expanduser(audio_path))})
+
+    final_messages = []
+    if system_msg:
+        final_messages.append({"role": "system", "content": [{"type": "text", "text": system_msg}]})
+    final_messages.extend(messages)
+    final_messages.append({"role": "user", "content": content_list})
+
+    payload = {
+        "model": selected_model,
+        "messages": final_messages,
+        "stream": args.stream
+    }
+
+    try:
+        req = urllib.request.Request(
+            f"http://localhost:{args.port}/v1/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        
+        raw_text = ""
+        with urllib.request.urlopen(req) as resp:
+            if args.stream:
+                for line in resp:
+                    line = line.decode("utf-8").strip()
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        chunk = json.loads(data_str)
+                        delta = chunk["choices"][0].get("delta", {})
+                        if "content" in delta:
+                            text_part = delta["content"]
+                            raw_text += text_part
+                            if not args.json: print(text_part, end="", flush=True)
+                if not args.json: print()
+            else:
+                result = json.loads(resp.read().decode("utf-8"))
+                raw_text = result["choices"][0]["message"]["content"]
+                if not args.json: print(raw_text)
+
+        if args.json:
+            clean_text = raw_text.strip()
+            if clean_text.startswith("```"):
+                start, end = clean_text.find("{"), clean_text.rfind("}") + 1
+                if start != -1 and end != 0: clean_text = clean_text[start:end]
+            try:
+                print(json.dumps(json.loads(clean_text), indent=2))
+            except:
+                print(json.dumps({"error": "Failed to parse JSON", "raw": raw_text}, indent=2))
+        
+        return True
+    except Exception as e:
+        print(f"[Warning] Server diversion failed: {e}. Falling back to local Engine.", file=sys.stderr)
+        return False
+
 def main():
     parser = argparse.ArgumentParser(description="gbox - Quick inference tool for LiteRT-LM (context window maxes out at 4096 tokens). Server includes /models endpoint.")
     parser.add_argument("model_or_prompt", nargs="?", help="Model ID, path, or the prompt itself")
@@ -424,14 +539,15 @@ def main():
 
     parser.add_argument("--json", action="store_true", help="Output strict JSON")
     parser.add_argument("--stream", action="store_true", help="Stream the response in real-time")
-    parser.add_argument("--server", nargs="?", const="start", choices=["start", "stop", "status", "logs"], help="Server control: start, stop, status, logs")
+    parser.add_argument("--no-server", action="store_true", help="Disable automatic server diversion")
+    parser.add_argument("--server", nargs="?", const="start", choices=["start", "stop", "status", "logs", "config", "models"], help="Server control: start, stop, status, logs, config, models")
     parser.add_argument("--_internal_run", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, default=8955, help="Server port (default: 8955)")
     parser.add_argument("--backend", default=default_backend, choices=["cpu", "gpu"])
     parser.add_argument("--vision-backend", default=default_backend, choices=["cpu", "gpu"])
     parser.add_argument("--audio-backend", default="cpu", choices=["cpu", "gpu"])
     parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum context window size (input + output tokens, max 4096)")
-    parser.add_argument("--version", action="version", version="gbox 0.2.0 (litert-lm 0.10.1)")
+    parser.add_argument("--version", action="version", version="gbox 0.3.0 (litert-lm 0.10.1)")
     args = parser.parse_args()
 
     # Server control logic
@@ -477,7 +593,21 @@ def main():
                 sys.exit(0)
             print("No log file found.")
             sys.exit(1)
-            
+
+        elif args.server in ("config", "models"):
+            url = f"http://localhost:{args.port}/{args.server}"
+            try:
+                with urllib.request.urlopen(url, timeout=2.0) as resp:
+                    body = resp.read().decode("utf-8")
+            except (urllib.error.URLError, ConnectionRefusedError) as e:
+                print(f"Server is NOT reachable on port {args.port}: {e}", file=sys.stderr)
+                sys.exit(1)
+            try:
+                print(json.dumps(json.loads(body), indent=2))
+            except ValueError:
+                print(body)
+            sys.exit(0)
+
         elif args.server == "start":
             if os.path.exists(pid_file):
                 with open(pid_file, "r") as f:
@@ -586,8 +716,11 @@ def main():
 
     # Stdin
     stdin_content = b""
-    if not sys.stdin.isatty():
-        stdin_content = sys.stdin.buffer.read()
+    if not args.server and not sys.stdin.isatty():
+        try:
+            stdin_content = sys.stdin.buffer.read()
+        except OSError:
+            pass
 
     extracted_text = ""
     pdf_image = None
@@ -643,6 +776,9 @@ def main():
         )
         system_msg = (system_msg or "You are a helpful assistant.") + schema_instruction
 
+    if try_forward_to_server(args, selected_model, tools, messages, system_msg, context_text, full_prompt, image_path, audio_path):
+        return
+
     # Inference
     model_path = resolve_model_path(selected_model)
     backend = litert_lm.Backend.GPU if args.backend == "gpu" else litert_lm.Backend.CPU
@@ -661,7 +797,7 @@ def main():
             )        
         
         if args.server:
-            run_server(args, engine, tools, system_msg)
+            run_server(args, engine, selected_model, tools, system_msg)
             return
 
         final_messages = []

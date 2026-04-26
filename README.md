@@ -126,16 +126,29 @@ echo "I love this tool!" | gbox --schema schema.json --json
 
 gbox can run as a background service to keep the model "warm," significantly reducing the latency of subsequent requests by avoiding repeated model loading.
 
+### Automatic Server Diversion (Smart Proxy)
+When you run a standard `gbox` command, it will automatically check if a compatible server is already running. If the server's model and loaded tools satisfy your request, `gbox` will transparently divert the inference to the server. 
+
+**Benefits:**
+- **Near-Zero Latency:** Avoids the 3-10 second model loading penalty.
+- **Resource Safety:** Prevents multiple model instances from overloading your system's VRAM/RAM.
+
+If the server is incompatible (e.g., you requested `--high` but the server is running the default model), `gbox` will fall back to local execution. Use the `--no-server` flag to force local execution regardless of server status.
+
 ### Control Subcommands
 - **Start**: `gbox --server start` (or simply `gbox --server`) - Daemonizes the process.
 - **Stop**: `gbox --server stop` - Terminates the background process.
 - **Status**: `gbox --server status` - Checks if the server is running.
 - **Logs**: `gbox --server logs` - Tails the server output from `~/.gbox/server.log`.
+- **Config**: `gbox --server config` - Prints the running server's active model, tools, and limits (proxies `GET /config`).
+- **Models**: `gbox --server models` - Lists models the running server can load (proxies `GET /models`).
 
 ### API Usage
 The server listens on port **8955** by default and provides OpenAI-compatible endpoints:
 - `POST /v1/chat/completions`
 - `POST /infer`
+- `GET /config` (returns active model, tools, and limits)
+- `GET /models` (OpenAI-shaped list of available models)
 
 #### Sample JSON Request (Non-Streaming)
 ```bash
@@ -173,7 +186,8 @@ curl http://localhost:8955/v1/chat/completions \
 | `--context` | Path to JSONL (history) or Markdown (text) file. |
 | `--json` | Output strict JSON (cleans markdown filler). |
 | `--stream` | Stream the response in real-time. |
-| `--server` | Server control: `start`, `stop`, `status`, `logs`. |
+| `--no-server` | Disable automatic server diversion. |
+| `--server` | Server control: `start`, `stop`, `status`, `logs`, `config`, `models`. |
 | `--port` | Port for the inference server (default: 8955). |
 | `--tools` | Comma-separated list of tools or sets. |
 | `--presets` | Path to your `preset.py` file. |
