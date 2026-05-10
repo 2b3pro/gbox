@@ -1,8 +1,24 @@
-# gbox - LiteRT-LM Inference Tool
+# gbox — Local, Free, Multimodal AI on Your Mac
 
 ![gbox Banner](assets/banner.png)
 
-A powerful, multimodal CLI wrapper for the LiteRT-LM Python API. This tool allows for quick inference with support for text, images, audio, PDFs, structured JSON output, and modular tool calling.
+**100% local. 100% free. No API keys, no usage caps, no telemetry, no cloud round-trips.**
+
+`gbox` is a command-line wrapper around Google's [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) runtime and Google's open [Gemma 3n](https://ai.google.dev/gemma) models, optimized for Apple Silicon. It gives you a multimodal AI assistant — text, image, audio, PDF — that runs entirely on your own hardware, with first-class shell ergonomics and a real tool-calling system.
+
+## Why gbox?
+
+- 🆓 **Free forever** — no subscription, no token billing. The models are open-weight and downloaded once.
+- 🏠 **Fully local & private** — every byte of your prompts, files, screenshots, and audio stays on your machine. Nothing leaves the box.
+- ⚡ **Fast on Apple Silicon** — backed by Google's LiteRT-LM with Metal GPU acceleration, plus an optional warm-server mode that eliminates the model-load penalty.
+- 🧰 **Real tool calling** — the model can read your filesystem, run AppleScript, query SQLite, OCR images, control macOS, search the web, and more — gated by an explicit `--tools` allowlist.
+- 🔌 **OpenAI-compatible API** — drop-in `/v1/chat/completions` endpoint so existing OpenAI client code works unchanged against your local model.
+- 🐚 **Unix-native** — pipes, stdin, exit codes, streaming. Composes with the rest of your shell.
+
+### Built on Google's open AI stack
+
+- **[LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM)** — Google AI Edge's on-device LLM runtime ([overview](https://ai.google.dev/edge/litert)).
+- **[Gemma 3n](https://ai.google.dev/gemma/docs/gemma-3n)** — Google's multimodal open models designed for edge devices ([model card](https://huggingface.co/google/gemma-3n-E4B-it-litert-lm)).
 
 ## Features
 
@@ -197,3 +213,21 @@ curl http://localhost:8955/v1/chat/completions \
 | `--vision-backend` | Vision backend (`cpu` or `gpu`). Defaults to `gpu` on Apple Silicon. |
 | `--audio-backend` | Audio backend (`cpu` or `gpu`). Defaults to `cpu`. |
 | `--max-tokens` | KV cache size (default: 4096). |
+
+---
+
+## Support
+
+If this project helps you keep your AI workflows local and free, consider buying me a coffee! It helps keep the updates coming.
+
+<a href="https://paypal.me/2b3/5">
+  <img src="https://img.shields.io/badge/Donate-PayPal-blue.svg" alt="Donate with PayPal" />
+</a>
+
+**[https://paypal.me/2b3/5](https://paypal.me/2b3/5)**
+
+---
+
+## License
+
+MIT License - Created by [Ian Shen](https://github.com/2b3pro).

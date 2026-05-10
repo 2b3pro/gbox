@@ -6,6 +6,7 @@ __pycache__/
 env/
 venv/
 ENV/
+.env
 
 # OS specific
 .DS_Store
@@ -25,3 +26,8 @@ default.profraw
 # Temporary files
 /tmp/record-*
 /tmp/screenshot-*
+
+# Personal / local-only
+alfred/
+CLAUDE.md
+GEMINI.md
