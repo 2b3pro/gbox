@@ -195,6 +195,19 @@ def resolve_fabric_resource(resource_type, name):
             return path
     return None
 
+def copy_to_clipboard(text):
+    """Copies text to the macOS clipboard via pbcopy."""
+    if not text:
+        return
+    import subprocess
+    try:
+        subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
+        print("[Copied to clipboard]", file=sys.stderr)
+    except FileNotFoundError:
+        print("Warning: pbcopy not found (macOS only).", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: Failed to copy to clipboard: {e}", file=sys.stderr)
+
 def process_pdf(pdf_bytes):
     """Processes PDF bytes and returns extracted text and a preview image path."""
     text = ""
@@ -507,16 +520,21 @@ def try_forward_to_server(args, selected_model, tools, messages, system_msg, con
                 raw_text = result["choices"][0]["message"]["content"]
                 if not args.json: print(raw_text)
 
+        final_output = raw_text
         if args.json:
             clean_text = raw_text.strip()
             if clean_text.startswith("```"):
                 start, end = clean_text.find("{"), clean_text.rfind("}") + 1
                 if start != -1 and end != 0: clean_text = clean_text[start:end]
             try:
-                print(json.dumps(json.loads(clean_text), indent=2))
+                final_output = json.dumps(json.loads(clean_text), indent=2)
             except:
-                print(json.dumps({"error": "Failed to parse JSON", "raw": raw_text}, indent=2))
-        
+                final_output = json.dumps({"error": "Failed to parse JSON", "raw": raw_text}, indent=2)
+            print(final_output)
+
+        if args.clipboard:
+            copy_to_clipboard(final_output)
+
         return True
     except urllib.error.HTTPError as e:
         body = ""
@@ -553,6 +571,7 @@ def main():
 
     parser.add_argument("--json", action="store_true", help="Output strict JSON")
     parser.add_argument("--stream", action="store_true", help="Stream the response in real-time")
+    parser.add_argument("-c", "--clipboard", action="store_true", help="Copy the final result to the macOS clipboard")
     parser.add_argument("--no-server", action="store_true", help="Disable automatic server diversion")
     parser.add_argument("--server", nargs="?", const="start", choices=["start", "stop", "status", "logs", "config", "models"], help="Server control: start, stop, status, logs, config, models")
     parser.add_argument("--_internal_run", action="store_true", help=argparse.SUPPRESS)
@@ -866,16 +885,21 @@ def main():
                 with open(session_path, "w") as f:
                     json.dump(messages, f, indent=2)
 
+            final_output = raw_text
             if args.json:
                 clean_text = raw_text.strip()
                 if clean_text.startswith("```"):
                     start, end = clean_text.find("{"), clean_text.rfind("}") + 1
                     if start != -1 and end != 0: clean_text = clean_text[start:end]
                 try:
-                    print(json.dumps(json.loads(clean_text), indent=2))
+                    final_output = json.dumps(json.loads(clean_text), indent=2)
                 except:
-                    print(json.dumps({"error": "Failed to parse JSON", "raw": raw_text}, indent=2))
-                
+                    final_output = json.dumps({"error": "Failed to parse JSON", "raw": raw_text}, indent=2)
+                print(final_output)
+
+            if args.clipboard:
+                copy_to_clipboard(final_output)
+
     except Exception as e:
         print(f"Runtime Error: {e}", file=sys.stderr)
         sys.exit(1)

@@ -26,6 +26,7 @@
 - **PDF Intelligence**: Automatically detects piped PDFs, extracting text and rendering the first page for the vision backend.
 - **Structured Output**: Enforce strict JSON responses using the `--schema` flag.
 - **Real-Time Streaming**: Use the `--stream` flag to see the model's response as it generates.
+- **Clipboard Output**: Pass `-c` / `--clipboard` to copy the final result straight to the macOS clipboard.
 - **System Instructions**: Inject system-level instructions or named Fabric patterns using the `--system-file` flag.
 - **Modular Tooling**: Enable specific tools or predefined tool sets from a modular `tools/` package.
 - **Context Awareness**: Inject conversation history via JSONL or raw text context via Markdown using the `--context` flag.
@@ -61,6 +62,9 @@ gbox --prompt instructions.txt
 
 # With real-time streaming
 gbox --stream "Write a long poem"
+
+# Copy the result to the clipboard (also works with --json / --stream)
+gbox -c "Draft a tweet about on-device inference"
 ```
 
 ### Multimodal (Image & Audio)
@@ -202,6 +206,7 @@ curl http://localhost:8955/v1/chat/completions \
 | `--context` | Path to JSONL (history) or Markdown (text) file. |
 | `--json` | Output strict JSON (cleans markdown filler). |
 | `--stream` | Stream the response in real-time. |
+| `-c`, `--clipboard` | Copy the final result to the macOS clipboard (via `pbcopy`). |
 | `--no-server` | Disable automatic server diversion. |
 | `--server` | Server control: `start`, `stop`, `status`, `logs`, `config`, `models`. |
 | `--port` | Port for the inference server (default: 8955). |
