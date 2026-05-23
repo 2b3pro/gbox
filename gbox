@@ -23,6 +23,7 @@ if __name__ == "__main__":
 
 import json
 import importlib.util
+import importlib.metadata
 import argparse
 import platform
 import litert_lm
@@ -31,6 +32,8 @@ import datetime
 import urllib.request
 import urllib.error
 from contextlib import contextmanager
+
+__version__ = "0.3.0"
 
 @contextmanager
 def suppress_stderr():
@@ -581,19 +584,29 @@ def main():
     parser.add_argument("--audio-backend", default="cpu", choices=["cpu", "gpu"])
     parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum context window size (input + output tokens, max 4096)")
     parser.add_argument("--upgrade", action="store_true", help="Upgrade litert-lm via 'uv tool upgrade litert-lm'")
-    parser.add_argument("--version", action="version", version="gbox 0.3.0 (litert-lm 0.10.1)")
+    try:
+        _litert_version = importlib.metadata.version("litert-lm")
+    except importlib.metadata.PackageNotFoundError:
+        _litert_version = "unknown"
+    parser.add_argument("--version", action="version", version=f"gbox {__version__} (litert-lm {_litert_version})")
     args = parser.parse_args()
 
-    # Upgrade litert-lm and exit
+    # Upgrade litert-lm in the venv gbox actually runs in, and exit
     if args.upgrade:
         import subprocess
-        print("Upgrading litert-lm via 'uv tool upgrade litert-lm'...")
+        print(f"Upgrading litert-lm in {sys.executable}...")
         try:
-            result = subprocess.run(["uv", "tool", "upgrade", "litert-lm"], check=False)
+            result = subprocess.run(
+                ["uv", "pip", "install", "--python", sys.executable, "--upgrade", "litert-lm"],
+                check=False,
+            )
             sys.exit(result.returncode)
         except FileNotFoundError:
-            print("Error: 'uv' not found in PATH. Install uv from https://github.com/astral-sh/uv", file=sys.stderr)
-            sys.exit(1)
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--upgrade", "litert-lm"],
+                check=False,
+            )
+            sys.exit(result.returncode)
 
     # Server control logic
     if args.server and not args._internal_run:
