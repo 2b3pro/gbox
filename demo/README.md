@@ -1,0 +1,206 @@
+# gbox demos
+
+Real-world shell scripts powered by on-device LiteRT-LM inference via `gbox`. Inspired by Apfel https://github.com/Arthur-Ficial/apfel
+
+All demos work within the 4096-token context window — small input, small output, instant results. The system prompts live in [`systems/`](systems/) so you can tweak them without touching the scripts.
+
+## Speed tip: keep the server warm
+
+Cold-start inference reloads the model and the Metal/WebGPU delegate on every call. If you'll run these often, start the server once and `gbox` will auto-proxy through it:
+
+```bash
+gbox --server start          # daemonizes; pid/log live in ~/.gbox/
+gbox --server status
+```
+
+Every demo below will be near-instant while the server is running, with no code changes — `gbox`'s smart proxy diverts matching requests to the local HTTP server automatically.
+
+## cmd
+
+Natural language to shell command. Faster than Googling, works offline.
+
+```bash
+./cmd "find all .log files modified today"
+$ find . -name "*.log" -type f -mtime -1
+
+./cmd -c "disk usage sorted by size"    # copy to clipboard
+./cmd -x "show open ports"              # execute (asks confirmation)
+```
+
+## oneliner
+
+Complex pipe chains from plain English. Specializes in awk, sed, find, xargs, sort, uniq, grep, cut, tr, jq.
+
+```bash
+./oneliner "sum the third column of a CSV"
+$ awk -F',' '{sum += $3} END {print sum}' file.csv
+
+./oneliner "count unique IPs in access.log"
+$ awk '{print $1}' access.log | sort | uniq -c | sort -rn
+
+./oneliner -c "remove duplicate lines keeping order"    # copy to clipboard
+./oneliner -x "sort processes by memory"                # execute (asks confirmation)
+```
+
+## wtd
+
+What's this directory? Instant orientation in any project.
+
+```bash
+./wtd                    # current directory
+./wtd ~/some/project     # any directory
+./wtd -c .               # copy summary to clipboard
+```
+
+Checks file listing, README, package.json/Package.swift/Cargo.toml/go.mod, git branch and last commit, then tells you what this project is, what language, and how to run it.
+
+**Example output:**
+
+```
+The directory /Users/you/dev/gbox contains a Python CLI that wraps litert-lm
+for on-device multimodal inference on Apple Silicon. It's a single-file
+script — run it directly as ./gbox "prompt" from the repo root.
+```
+
+## explain
+
+Explain a command, error message, or code snippet.
+
+```bash
+./explain "awk -F: '{print \$1,\$3}' /etc/passwd | sort -t' ' -k2 -n"
+./explain "error: use of undeclared identifier 'URLSession'"
+./explain "curl -sSL -o /dev/null -w '%{http_code}'"
+pbpaste | ./explain       # explain whatever's on clipboard
+dmesg | tail -5 | ./explain
+```
+
+**Example output:**
+
+```
+This command processes /etc/passwd, extracting the username (field 1) and
+user ID (field 3) using colon as delimiter, then sorts the output
+numerically by user ID.
+```
+
+## naming
+
+Name things well. Describe what something does, get naming suggestions.
+
+```bash
+./naming "function that retries HTTP requests with exponential backoff"
+./naming "variable for the count of failed login attempts"
+./naming "class that manages WebSocket connections"
+./naming -c "file containing database migration scripts"    # copy to clipboard
+```
+
+**Example output:**
+
+```
+retryWithBackoff | retry_with_backoff | retries with exponential delay
+httpRetryHandler | http_retry_handler | handles HTTP retry logic
+fetchWithRetry | fetch_with_retry | fetch with automatic retries
+resilientRequest | resilient_request | request that survives failures
+backoffExecutor | backoff_executor | executes with increasing delays
+```
+
+## port
+
+What's using this port? Identifies the process and explains what it is.
+
+```bash
+./port 3000
+./port 8080
+./port 5432
+./port -c 3000    # copy to clipboard
+```
+
+**Example output:**
+
+```
+Process 1234, named node, is listening on port 3000 - this is likely
+a Node.js development server (Express, Next.js, or similar).
+```
+
+## gitsum
+
+Summarize recent git activity in plain English.
+
+```bash
+./gitsum          # last 10 commits
+./gitsum 20       # last 20 commits
+./gitsum -c       # copy summary to clipboard
+```
+
+**Example output:**
+
+```
+Recent work focused on adding the smart proxy diversion, a dynamic version
+display, and a --clipboard flag for piping results into pbcopy. Documentation
+was reorganized to lead with the local/free/Google value proposition.
+```
+
+## mac-narrator
+
+Your Mac's inner monologue. Narrates system state in dry British humor.
+
+```bash
+./mac-narrator                    # one-shot observation
+./mac-narrator --watch            # continuous, every 60s
+./mac-narrator --watch -i 30      # every 30 seconds
+./mac-narrator --watch -t 50      # only narrate when score > 50 (quiet mode)
+./mac-narrator --say              # speak the narration aloud
+```
+
+**Example output:**
+
+```
+[14:23:07] Ah, the eternal dance — Claude Code consuming 8.2% CPU whilst
+its human presumably waits for it to finish. Meanwhile, WindowServer
+soldiers on at 3.1%, dutifully rendering pixels that nobody is looking at.
+```
+
+## Requirements
+
+- `gbox` installed and on `$PATH` (clone the repo and either symlink `gbox` or add the repo to `$PATH`)
+- A LiteRT-LM model present in `~/.litert-lm/models/` (or under `$LITERT_LM_MODELS_DIR`) — `gemma-4-E2B-it` is the default
+- macOS on Apple Silicon for GPU/Metal acceleration (CPU also works elsewhere)
+
+## Install demos globally (optional)
+
+The demos are intentionally **not** part of `gbox` itself. Names like `cmd`, `port`, `explain`, and `naming` are too generic for global `$PATH` — `port` would shadow MacPorts, `cmd` is a common variable name in many shell scripts.
+
+If you want them available system-wide, symlink each one with a `gbox-` prefix. **Run this from the gbox repo root** — the loop uses `$(pwd)` to build absolute symlink targets, and a relative target will produce a broken link:
+
+```bash
+cd /path/to/gbox        # must be the repo root
+mkdir -p "$HOME/.local/bin"
+for d in cmd explain gitsum mac-narrator naming oneliner port wtd; do
+  ln -sf "$(pwd)/demo/$d" "$HOME/.local/bin/gbox-$d"
+done
+```
+
+Then invoke them as `gbox-cmd "find large files"`, `gbox-port 3000`, etc. The scripts resolve their own location through symlinks, so the sibling `systems/` directory keeps working.
+
+**Symlinking just one?** Use an absolute path explicitly — `ln -s demo/gitsum ~/.local/bin/gitsum` stores `demo/gitsum` verbatim and will resolve relative to `~/.local/bin/`, producing a broken link:
+
+```bash
+# Wrong — relative target, broken symlink:
+ln -s demo/gitsum ~/.local/bin/gitsum
+
+# Right — absolute target:
+ln -sf "$(pwd)/demo/gitsum" ~/.local/bin/gitsum   # from gbox repo root
+# or
+ln -sf /full/path/to/gbox/demo/gitsum ~/.local/bin/gitsum
+```
+
+Verify with `ls -la ~/.local/bin/<name>` — the target should be an absolute path.
+
+**Caveats:**
+
+- The symlinks point at your current clone. If you move or delete the `gbox/` directory, the symlinks break — re-run the loop from the new location.
+- Make sure `$HOME/.local/bin` is on your `$PATH` (`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc`).
+- To remove later: `for d in cmd explain gitsum mac-narrator naming oneliner port wtd; do rm -f "$HOME/.local/bin/gbox-$d"; done`
+
+## Customizing prompts
+
+Each demo's system prompt lives in [`systems/<name>.md`](systems/). Edit those files to tune tone, output format, or constraints — no need to touch the shell scripts. You can also point `gbox --system-file` at any other path or [Fabric](https://github.com/danielmiessler/fabric) pattern name.

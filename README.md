@@ -4,7 +4,7 @@
 
 **100% local. 100% free. No API keys, no usage caps, no telemetry, no cloud round-trips.**
 
-`gbox` is a command-line wrapper around Google's [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) runtime and Google's open [Gemma 3n](https://ai.google.dev/gemma) models, optimized for Apple Silicon. It gives you a multimodal AI assistant — text, image, audio, PDF — that runs entirely on your own hardware, with first-class shell ergonomics and a real tool-calling system.
+`gbox` is a command-line wrapper around Google's [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) runtime and Google's open [Gemma 4](https://ai.google.dev/gemma) models, optimized for Apple Silicon. It gives you a multimodal AI assistant — text, image, audio, PDF — that runs entirely on your own hardware, with first-class shell ergonomics and a real tool-calling system.
 
 ## Why gbox?
 
@@ -18,7 +18,7 @@
 ### Built on Google's open AI stack
 
 - **[LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM)** — Google AI Edge's on-device LLM runtime ([overview](https://ai.google.dev/edge/litert)).
-- **[Gemma 3n](https://ai.google.dev/gemma/docs/gemma-3n)** — Google's multimodal open models designed for edge devices ([model card](https://huggingface.co/google/gemma-3n-E4B-it-litert-lm)).
+- **[Gemma 4](https://ai.google.dev/gemma)** — Google's multimodal open models designed for edge devices. `gbox` defaults to `gemma-4-E2B-it` and switches to `gemma-4-E4B-it` with `--high`.
 
 ## Features
 
@@ -218,6 +218,23 @@ curl http://localhost:8955/v1/chat/completions \
 | `--vision-backend` | Vision backend (`cpu` or `gpu`). Defaults to `gpu` on Apple Silicon. |
 | `--audio-backend` | Audio backend (`cpu` or `gpu`). Defaults to `cpu`. |
 | `--max-tokens` | KV cache size (default: 4096). |
+
+---
+
+## Demos
+
+The [`demo/`](demo/) directory ships a set of single-file bash utilities built on `gbox` — `cmd` (natural language → shell command), `oneliner` (pipe chains from English), `wtd` ("what is this directory?"), `explain`, `naming`, `port`, `gitsum`, and `mac-narrator`. Inspired by [apfel](https://github.com/Arthur-Ficial/apfel)'s demo set, ported to use on-device LiteRT-LM via `gbox` instead of Apple Intelligence.
+
+```bash
+cd demo
+./cmd "find all .log files modified today"
+./gitsum 20
+./wtd ~/some/project
+```
+
+System prompts live in [`demo/systems/`](demo/systems/) so you can tune tone or output format without touching bash. See [`demo/README.md`](demo/README.md) for the full list, examples, and global-install instructions.
+
+> **Speed tip:** run `gbox --server start` once. Every demo call then auto-proxies through the warm server instead of cold-starting the model.
 
 ---
 

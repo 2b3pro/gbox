@@ -1,0 +1,85 @@
+#!/bin/bash
+# cmd — natural language to shell command, powered by gbox (LiteRT-LM on-device)
+# Install globally as `gbox-cmd`: see demo/README.md "Install demos globally (optional)"
+#
+# Usage:  cmd "find files larger than 100MB"
+#         cmd -x "list all open ports"             # execute (asks confirm)
+#         cmd -c "show disk usage sorted by size"  # copy to clipboard
+#
+# Requires: gbox installed (https://github.com/2b3pro/gbox)
+
+EXECUTE=false
+COPY=false
+
+# Resolve script directory, following symlinks (so global-install via symlink works)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+SYSTEM_FILE="$SCRIPT_DIR/systems/cmd.md"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -x|--execute)  EXECUTE=true; shift ;;
+        -c|--copy)     COPY=true; shift ;;
+        -h|--help)
+            echo "cmd — natural language to shell command"
+            echo ""
+            echo "Usage: cmd [OPTIONS] \"description\""
+            echo ""
+            echo "  -x, --execute  Run the command (asks confirmation first)"
+            echo "  -c, --copy     Copy command to clipboard"
+            echo "  -h, --help     Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  cmd \"find all .log files modified today\""
+            echo "  cmd -x \"show disk usage sorted by size\""
+            echo "  cmd -c \"awk to sum column 3 of a CSV\""
+            echo ""
+            echo "Requires: gbox (LiteRT-LM on-device CLI)"
+            exit 0
+            ;;
+        -*) echo "Unknown option: $1. Use --help."; exit 1 ;;
+        *)  break ;;
+    esac
+done
+
+if [[ -z "$1" ]]; then
+    echo "Usage: cmd \"what you want to do\""
+    echo "       cmd --help for more options"
+    exit 1
+fi
+
+if ! command -v gbox &>/dev/null; then
+    echo "Error: gbox not found. Install from https://github.com/2b3pro/gbox" >&2
+    exit 1
+fi
+
+result=$(gbox --system-file "$SYSTEM_FILE" "$1")
+status=$?
+
+if [[ $status -ne 0 ]]; then
+    echo "Error: gbox failed (exit $status)" >&2
+    exit $status
+fi
+
+# Strip markdown fences, ANSI escape sequences, and whitespace
+result=$(echo "$result" | sed '/^```/d' | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | sed 's/^[[:space:]]*//' | sed '/^$/d')
+
+if $COPY; then
+    echo "$result" | pbcopy
+    echo -e "\033[90m(copied to clipboard)\033[0m"
+fi
+
+echo -e "\033[32m\$\033[0m $result"
+
+if $EXECUTE; then
+    echo ""
+    read -r -p "Run this? [y/N] " confirm
+    if [[ "$confirm" =~ ^[yY]$ ]]; then
+        eval "$result"
+    fi
+fi

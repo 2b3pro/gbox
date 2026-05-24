@@ -1,0 +1,84 @@
+#!/bin/bash
+# explain — explain a command, error, or code snippet, powered by gbox (LiteRT-LM on-device)
+# Install globally as `gbox-explain`: see demo/README.md "Install demos globally (optional)"
+#
+# Usage:  explain "awk -F: '{print \$1,\$3}' /etc/passwd | sort -t' ' -k2 -n"
+#         pbpaste | explain          # explain clipboard contents
+#         echo "error: ..." | explain
+#         explain -c "xargs -I{}"    # copy explanation to clipboard
+#
+# Requires: gbox installed (https://github.com/2b3pro/gbox)
+
+COPY=false
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+SYSTEM_FILE="$SCRIPT_DIR/systems/explain.md"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--copy) COPY=true; shift ;;
+        -h|--help)
+            echo "explain — explain a command, error, or code snippet"
+            echo ""
+            echo "Usage: explain [OPTIONS] \"snippet\""
+            echo "       command 2>&1 | explain"
+            echo "       pbpaste | explain"
+            echo ""
+            echo "  -c, --copy  Copy explanation to clipboard"
+            echo "  -h, --help  Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  explain \"awk -F: '{print \\\$1}' /etc/passwd\""
+            echo "  explain \"error: use of undeclared identifier 'x'\""
+            echo "  explain \"curl -sSL -o /dev/null -w '%{http_code}'\""
+            echo "  pbpaste | explain"
+            echo "  dmesg | tail -5 | explain"
+            echo ""
+            echo "Requires: gbox (LiteRT-LM on-device CLI)"
+            exit 0
+            ;;
+        -*) echo "Unknown option: $1. Use --help."; exit 1 ;;
+        *)  break ;;
+    esac
+done
+
+if ! command -v gbox &>/dev/null; then
+    echo "Error: gbox not found. Install from https://github.com/2b3pro/gbox" >&2
+    exit 1
+fi
+
+# Get input from argument or stdin
+if [[ -n "$1" ]]; then
+    input="$1"
+elif [[ ! -t 0 ]]; then
+    input=$(cat)
+else
+    echo "Usage: explain \"command or error message\""
+    echo "       some-command | explain"
+    echo "       explain --help for more options"
+    exit 1
+fi
+
+# Truncate if too long (keep within the 4096-token context window)
+input=$(echo "$input" | head -30)
+
+result=$(echo "$input" | gbox --system-file "$SYSTEM_FILE")
+status=$?
+
+if [[ $status -ne 0 ]]; then
+    echo "Error: gbox failed (exit $status)" >&2
+    exit $status
+fi
+
+if $COPY; then
+    echo "$result" | pbcopy
+    echo -e "\033[90m(copied to clipboard)\033[0m"
+fi
+
+echo "$result"

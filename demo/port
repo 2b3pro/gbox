@@ -1,0 +1,85 @@
+#!/bin/bash
+# port — what's using this port?, powered by gbox (LiteRT-LM on-device)
+# Install globally as `gbox-port`: see demo/README.md "Install demos globally (optional)"
+#
+# Usage:  port 3000
+#         port 8080
+#         port 5432 -c    # copy to clipboard
+#
+# Requires: gbox installed (https://github.com/2b3pro/gbox)
+
+COPY=false
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+SYSTEM_FILE="$SCRIPT_DIR/systems/port.md"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--copy) COPY=true; shift ;;
+        -h|--help)
+            echo "port — what's using this port?"
+            echo ""
+            echo "Usage: port [OPTIONS] <port-number>"
+            echo ""
+            echo "  -c, --copy  Copy explanation to clipboard"
+            echo "  -h, --help  Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  port 3000"
+            echo "  port 8080"
+            echo "  port 5432"
+            echo ""
+            echo "Requires: gbox (LiteRT-LM on-device CLI)"
+            exit 0
+            ;;
+        -*) echo "Unknown option: $1. Use --help."; exit 1 ;;
+        *)  PORT="$1"; shift ;;
+    esac
+done
+
+if [[ -z "$PORT" ]]; then
+    echo "Usage: port <port-number>"
+    echo "       port --help for more options"
+    exit 1
+fi
+
+if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+    echo "Error: '$PORT' is not a valid port number" >&2
+    exit 1
+fi
+
+if ! command -v gbox &>/dev/null; then
+    echo "Error: gbox not found. Install from https://github.com/2b3pro/gbox" >&2
+    exit 1
+fi
+
+info=$(lsof -i :"$PORT" -P -n 2>/dev/null)
+
+if [[ -z "$info" ]]; then
+    echo "Nothing is using port $PORT."
+    exit 0
+fi
+
+result=$(echo "Port $PORT:
+$info" | gbox --system-file "$SYSTEM_FILE")
+status=$?
+
+if [[ $status -ne 0 ]]; then
+    echo "Error: gbox failed (exit $status)" >&2
+    # Fallback: just show raw lsof output
+    echo "$info"
+    exit $status
+fi
+
+if $COPY; then
+    echo "$result" | pbcopy
+    echo -e "\033[90m(copied to clipboard)\033[0m"
+fi
+
+echo "$result"

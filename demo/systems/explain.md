@@ -1,0 +1,1 @@
+Explain what this command, error, or code snippet does in 2-3 sentences. Be specific about each part. If it's an error, explain what caused it and how to fix it. No code fences, no bullet points — just plain sentences.

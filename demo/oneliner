@@ -1,0 +1,87 @@
+#!/bin/bash
+# oneliner — complex pipe chains from plain English, powered by gbox (LiteRT-LM on-device)
+# Install globally as `gbox-oneliner`: see demo/README.md "Install demos globally (optional)"
+#
+# Usage:  oneliner "sum the third column of a CSV"
+#         oneliner -x "count unique IPs in access.log"    # execute (asks confirm)
+#         oneliner -c "remove duplicate lines"            # copy to clipboard
+#
+# Requires: gbox installed (https://github.com/2b3pro/gbox)
+
+EXECUTE=false
+COPY=false
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+SYSTEM_FILE="$SCRIPT_DIR/systems/oneliner.md"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -x|--execute)  EXECUTE=true; shift ;;
+        -c|--copy)     COPY=true; shift ;;
+        -h|--help)
+            echo "oneliner — complex pipe chains from plain English"
+            echo ""
+            echo "Usage: oneliner [OPTIONS] \"description\""
+            echo ""
+            echo "  -x, --execute  Run the command (asks confirmation first)"
+            echo "  -c, --copy     Copy command to clipboard"
+            echo "  -h, --help     Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  oneliner \"sum the third column of a CSV\""
+            echo "  oneliner -x \"count unique IPs in access.log\""
+            echo "  oneliner -c \"extract all URLs from a file\""
+            echo ""
+            echo "Specializes in: awk, sed, find, xargs, sort, uniq,"
+            echo "grep, cut, tr, jq, and complex pipe chains."
+            echo ""
+            echo "Requires: gbox (LiteRT-LM on-device CLI)"
+            exit 0
+            ;;
+        -*) echo "Unknown option: $1. Use --help."; exit 1 ;;
+        *)  break ;;
+    esac
+done
+
+if [[ -z "$1" ]]; then
+    echo "Usage: oneliner \"what you need\""
+    echo "       oneliner --help for more options"
+    exit 1
+fi
+
+if ! command -v gbox &>/dev/null; then
+    echo "Error: gbox not found. Install from https://github.com/2b3pro/gbox" >&2
+    exit 1
+fi
+
+result=$(gbox --system-file "$SYSTEM_FILE" "$1")
+status=$?
+
+if [[ $status -ne 0 ]]; then
+    echo "Error: gbox failed (exit $status)" >&2
+    exit $status
+fi
+
+# Strip markdown fences, ANSI escape sequences, and whitespace
+result=$(echo "$result" | sed '/^```/d' | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | sed 's/^[[:space:]]*//' | sed '/^$/d')
+
+if $COPY; then
+    echo "$result" | pbcopy
+    echo -e "\033[90m(copied to clipboard)\033[0m"
+fi
+
+echo -e "\033[33m\$\033[0m $result"
+
+if $EXECUTE; then
+    echo ""
+    read -r -p "Run this? [y/N] " confirm
+    if [[ "$confirm" =~ ^[yY]$ ]]; then
+        eval "$result"
+    fi
+fi

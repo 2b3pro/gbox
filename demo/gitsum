@@ -1,0 +1,93 @@
+#!/bin/bash
+# gitsum — summarize recent git activity, powered by gbox (LiteRT-LM on-device)
+# Install globally as `gbox-gitsum`: see demo/README.md "Install demos globally (optional)"
+#
+# Usage:  gitsum          # last 10 commits
+#         gitsum 20       # last 20 commits
+#         gitsum -c       # copy summary to clipboard
+#
+# Requires: gbox installed (https://github.com/2b3pro/gbox)
+
+COPY=false
+COUNT=10
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+SYSTEM_FILE="$SCRIPT_DIR/systems/gitsum.md"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--copy) COPY=true; shift ;;
+        -h|--help)
+            echo "gitsum — summarize recent git activity"
+            echo ""
+            echo "Usage: gitsum [OPTIONS] [count]"
+            echo ""
+            echo "  count        Number of commits to summarize (default: 10)"
+            echo "  -c, --copy   Copy summary to clipboard"
+            echo "  -h, --help   Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  gitsum        # last 10 commits"
+            echo "  gitsum 20     # last 20 commits"
+            echo "  gitsum -c 5   # last 5, copy to clipboard"
+            echo ""
+            echo "Requires: gbox (LiteRT-LM on-device CLI)"
+            exit 0
+            ;;
+        -*) echo "Unknown option: $1. Use --help."; exit 1 ;;
+        *)
+            if [[ "$1" =~ ^[0-9]+$ ]]; then
+                COUNT="$1"
+            else
+                echo "Error: '$1' is not a number. Use --help." >&2
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
+
+if ! git rev-parse --git-dir &>/dev/null 2>&1; then
+    echo "Error: not a git repository" >&2
+    exit 1
+fi
+
+if ! command -v gbox &>/dev/null; then
+    echo "Error: gbox not found. Install from https://github.com/2b3pro/gbox" >&2
+    exit 1
+fi
+
+log=$(git log --oneline -"$COUNT" 2>/dev/null)
+branch=$(git branch --show-current 2>/dev/null)
+authors=$(git log --format='%an' -"$COUNT" 2>/dev/null | sort | uniq -c | sort -rn | head -5)
+
+if [[ -z "$log" ]]; then
+    echo "No commits found."
+    exit 0
+fi
+
+result=$(echo "Branch: $branch
+Recent $COUNT commits:
+$log
+
+Authors:
+$authors" | gbox --system-file "$SYSTEM_FILE")
+status=$?
+
+if [[ $status -ne 0 ]]; then
+    echo "Error: gbox failed (exit $status)" >&2
+    exit $status
+fi
+
+if $COPY; then
+    echo "$result" | pbcopy
+    echo -e "\033[90m(copied to clipboard)\033[0m"
+fi
+
+echo "$result"
