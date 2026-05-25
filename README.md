@@ -110,8 +110,11 @@ gbox --default --prompt "Who are you?"
 Enable only the tools required for the task. The tool will suggest `--high` if complex tools are enabled.
 
 ```bash
-# Enable specific tools and sets
-gbox --presets preset.py --tools "calculator,fs" --prompt "Find data.csv and calculate the mean"
+# Enable specific tools and sets (bundled preset.py is auto-resolved when --tools is given)
+gbox --tools "calculator,fs" --prompt "Find data.csv and calculate the mean"
+
+# Point at your own preset module instead
+gbox --presets ~/my-preset.py --tools "mac,my_custom_tool" --prompt "..."
 ```
 
 ### Context and History
@@ -133,7 +136,7 @@ gbox --context history.jsonl --prompt "Continue our chat"
 - `audio`: Recording and conversion
 - `dev`: Git workflow (status, diff)
 - `utils`: Math and SQLite queries
-- `mac`: macOS Power Features (Shortcuts, Finder selection, Spotlight search, TTS, Browser info, System Appearance, Screenshots/OCR, Launchd LCRUD)
+- `mac`: macOS Power Features (Shortcuts, Keyboard Maestro macros, Finder selection, Spotlight search, TTS, Browser info, System Appearance, Screenshots/OCR, Launchd LCRUD)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for a guide on adding your own tools.
 
@@ -212,8 +215,8 @@ curl http://localhost:8955/v1/chat/completions \
 | `--no-server` | Disable automatic server diversion. |
 | `--server` | Server control: `start`, `stop`, `status`, `logs`, `config`, `models`. |
 | `--port` | Port for the inference server (default: 8955). |
-| `--tools` | Comma-separated list of tools or sets. |
-| `--presets` | Path to your `preset.py` file. |
+| `--tools` | Comma-separated tools or sets to filter the preset down to (e.g. `mac`, `fs,web`). If `--presets` is omitted, the bundled `preset.py` next to `gbox` is auto-loaded. |
+| `--presets` | Path to a `preset.py` module. Optional when `--tools` is given (bundled preset is used). |
 | `--default` | Force `gemma-4-E2B-it`. |
 | `--high` | Force `gemma-4-E4B-it`. |
 | `--backend` | Engine backend (`cpu` or `gpu`). Defaults to `gpu` on Apple Silicon. |

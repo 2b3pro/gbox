@@ -21,6 +21,28 @@ def run_shortcut(name: str, input_text: str = "") -> str:
     except Exception as e:
         return f"Error: {e}"
 
+def run_keyboard_maestro_macro(name: str, parameter: str = "") -> str:
+    """Runs a Keyboard Maestro macro by name or UUID via the Keyboard Maestro Engine.
+
+    Args:
+        name: The exact name or UUID of the macro. UUIDs are recommended for renamed-safe triggering.
+        parameter: Optional value passed to the macro (available inside it as %TriggerValue%).
+    """
+    safe_name = name.replace("\\", "\\\\").replace('"', '\\"')
+    if parameter:
+        safe_param = parameter.replace("\\", "\\\\").replace('"', '\\"')
+        script = f'tell application "Keyboard Maestro Engine" to do script "{safe_name}" with parameter "{safe_param}"'
+    else:
+        script = f'tell application "Keyboard Maestro Engine" to do script "{safe_name}"'
+    try:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return f"Error: {r.stderr.strip() or 'osascript failed'}"
+        out = r.stdout.strip()
+        return out if out else "Macro executed successfully."
+    except Exception as e:
+        return f"Error: {e}"
+
 def get_finder_selection() -> str:
     """Returns the POSIX paths of all files currently selected in Finder."""
     script = '''
@@ -271,8 +293,9 @@ def launchd_service_control(label: str, action: str) -> str:
         return f"Error: {e}"
 
 tools = [
-    run_shortcut, 
-    get_finder_selection, 
+    run_shortcut,
+    run_keyboard_maestro_macro,
+    get_finder_selection,
     spotlight_search, 
     speak_text, 
     get_active_browser_info, 

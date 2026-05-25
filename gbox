@@ -33,7 +33,7 @@ import urllib.request
 import urllib.error
 from contextlib import contextmanager
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 @contextmanager
 def suppress_stderr():
@@ -667,8 +667,8 @@ Examples:
     parser.add_argument("--high", action="store_true", help="Use gemma-4-E4B-it model")
     parser.add_argument("--model", help="Model name or path (e.g. gemma-4-E4B-it, or any .litertlm file in a search path). See 'Model storage' section below for search order.")
     parser.add_argument("--prompt", help="The user prompt (overrides positional prompt)")
-    parser.add_argument("--presets", help="Path to preset.py")
-    parser.add_argument("--tools", help="Comma-separated list of tools or sets to enable")
+    parser.add_argument("--presets", help="Path to a preset.py module. If omitted but --tools is given, the bundled preset.py next to gbox is used automatically.")
+    parser.add_argument("--tools", help="Comma-separated tools or sets to filter the preset down to (e.g. 'mac', 'fs,web'). If --presets is omitted, the bundled preset.py is auto-loaded. See 'Available tools' below.")
     parser.add_argument("--system-file", help="Named Fabric pattern or system file to use as system prompt")
     parser.add_argument("--context", help="Named Fabric context or path to JSONL/Markdown file")
     parser.add_argument("--schema", help="Named Fabric schema or path to a JSON schema file")
@@ -920,8 +920,15 @@ Examples:
     is_high_requested = (selected_model == "gemma-4-E4B-it") or args.high
     litert_lm.set_min_log_severity(litert_lm.LogSeverity.ERROR)
 
-    # Load presets
+    # Load presets — auto-resolve bundled preset.py when --tools is given without --presets
     tools, system_msg = ([], "")
+    if args.tools and not args.presets:
+        bundled_preset = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preset.py")
+        if os.path.exists(bundled_preset):
+            args.presets = bundled_preset
+            print(f"[info] --tools given without --presets; using bundled preset: {bundled_preset}", file=sys.stderr)
+        else:
+            print(f"Warning: --tools '{args.tools}' ignored — no --presets given and bundled preset.py not found at {bundled_preset}", file=sys.stderr)
     if args.presets:
         tools, system_msg = load_preset(args.presets, args.tools)
         active_tool_names = {t.__name__ for t in tools}
