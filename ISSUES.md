@@ -25,3 +25,28 @@ This file tracks known limitations, hardware-specific constraints, and upstream 
 - **Reference:** [LiteRT-LM Issue #2072](https://github.com/google-ai-edge/LiteRT-LM/issues/2072)
 - **Description:** Some prebuilt `.dylib` files may be incorrectly packaged as x86_64 instead of arm64.
 - **Impact:** Potential load errors on Apple Silicon if certain sub-libraries are invoked.
+
+### CPU Decode Crash on Gemma 4 (#2149)
+- **Reference:** [LiteRT-LM Issue #2149](https://github.com/google-ai-edge/LiteRT-LM/issues/2149)
+- **Description:** Reports of segfaults on E4B models and hangs on E2B models when using the CPU engine.
+- **Impact:** High. Since `gbox` uses `E2B` by default and recommends `E4B` for high cognition tasks, this affects stability when using `--backend cpu`.
+
+### Function Tool Quote Tokens Bug (#2172)
+- **Reference:** [LiteRT-LM Issue #2172](https://github.com/google-ai-edge/LiteRT-LM/issues/2172)
+- **Description:** Raw Gemma 4 quote tokens (`<|"|>`) are incorrectly passed as string arguments in tool calls.
+- **Impact:** High. Causes tool arguments to be parsed incorrectly, particularly affecting complex tool strings (like AppleScript or bash commands).
+
+### Sampler Params Ignored on GPU/NPU (#2080)
+- **Reference:** [LiteRT-LM Issue #2080](https://github.com/google-ai-edge/LiteRT-LM/issues/2080)
+- **Description:** Session-level parameters like `temperature`, `topK`, and `seed` are ignored by GPU/NPU executors.
+- **Impact:** Medium. Model output might not respect custom sampling parameters on Apple Silicon/GPU backends.
+
+### CPU-only Build for Python (#2224)
+- **Reference:** [LiteRT-LM Issue #2224](https://github.com/google-ai-edge/LiteRT-LM/issues/2224)
+- **Description:** Request for a Python package without GPU dependencies.
+- **Impact:** Low. If implemented, could simplify CPU-only environment installations for `gbox`.
+
+### Auto-conversion Path Failure (#2093)
+- **Reference:** [LiteRT-LM Issue #2093](https://github.com/google-ai-edge/LiteRT-LM/issues/2093)
+- **Description:** CLI fails with `NameError: convert is not defined` during automatic model conversion.
+- **Impact:** Low. May affect users relying on automatic model conversions on first run.

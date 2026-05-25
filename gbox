@@ -33,7 +33,7 @@ import urllib.request
 import urllib.error
 from contextlib import contextmanager
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 @contextmanager
 def suppress_stderr():
@@ -291,7 +291,11 @@ def run_server(args, engine, selected_model, tools, system_msg):
                 data = {
                     "model": selected_model,
                     "tools": [t.__name__ for t in tools],
-                    "max_tokens": args.max_tokens
+                    "max_tokens": args.max_tokens,
+                    "enable_speculative_decoding": bool(getattr(args, "_mtp_resolved", False)),
+                    "backend": args.backend,
+                    "vision_backend": args.vision_backend,
+                    "audio_backend": args.audio_backend,
                 }
                 resp_json = json.dumps(data).encode("utf-8")
                 self.send_response(200)
@@ -441,8 +445,10 @@ def run_server(args, engine, selected_model, tools, system_msg):
             f.write(str(os.getpid()))
 
     server = ThreadingHTTPServer(("0.0.0.0", args.port), InferenceHandler)
+    mtp_state = "on" if getattr(args, "_mtp_resolved", False) else "off"
     print(f"Starting gbox inference server on http://0.0.0.0:{args.port}")
-    print(f"Endpoints: /infer, /v1/chat/completions, /models, /v1/models")
+    print(f"Model: {selected_model} | backend: {args.backend} | MTP: {mtp_state} | tools: {len(tools)}")
+    print(f"Endpoints: /infer, /v1/chat/completions, /models, /v1/models, /config")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -553,12 +559,113 @@ def try_forward_to_server(args, selected_model, tools, messages, system_msg, con
         print(f"[Warning] Server diversion failed: {e}. Falling back to local Engine.", file=sys.stderr)
         return False
 
+def _describe_model_storage():
+    """Return a formatted 'Model storage' block for the --help epilog showing
+    the search paths (in priority order), whether each exists, and any models
+    currently discoverable. Also points users at the LiteRT-LM HuggingFace community."""
+    storage_paths = []
+    env_path = os.getenv("LITERT_LM_MODELS_DIR")
+    if env_path:
+        storage_paths.append(("$LITERT_LM_MODELS_DIR", os.path.expanduser(env_path)))
+    storage_paths.append(("default", os.path.expanduser("~/.litert-lm/models")))
+    storage_paths.append(("default", os.path.expanduser("~/.config/litert-lm/models")))
+
+    lines = ["", "Model storage (search order — first match wins):"]
+    for label, path in storage_paths:
+        marker = "✓" if os.path.isdir(path) else "·"
+        lines.append(f"  {marker} {path}  [{label}]")
+    lines.append("  Override the primary location with: export LITERT_LM_MODELS_DIR=/path/to/models")
+
+    try:
+        discovered = get_available_models()
+    except Exception:
+        discovered = []
+    if discovered:
+        lines.append(f"  Discovered ({len(discovered)}): {', '.join(discovered)}")
+
+    lines.append("  More models: https://huggingface.co/litert-community  (download .litertlm into a search path above)")
+    return "\n".join(lines) + "\n"
+
+
+def _describe_bundled_preset():
+    """Inspect the bundled preset.py (next to this script) and return a formatted
+    'Available tools' block for the --help epilog. Returns '' if no preset is found
+    or it can't be loaded."""
+    preset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preset.py")
+    if not os.path.exists(preset_path):
+        return ""
+    try:
+        spec = importlib.util.spec_from_file_location("_help_preset", preset_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception:
+        return ""
+    tool_sets = getattr(module, "tool_sets", {}) or {}
+    all_tools = getattr(module, "tools", []) or []
+    if not tool_sets and not all_tools:
+        return ""
+    lines = ["", "Available tools (bundled preset.py — pass --presets preset.py to enable):"]
+    if tool_sets:
+        lines.append("  Sets:")
+        for set_name in sorted(tool_sets.keys()):
+            members = tool_sets[set_name]
+            names = ", ".join(t.__name__ for t in members)
+            lines.append(f"    {set_name:<8} ({len(members)}): {names}")
+    if all_tools:
+        unique_names = sorted({t.__name__ for t in all_tools})
+        lines.append(f"  All ({len(unique_names)}): {', '.join(unique_names)}")
+    return "\n".join(lines) + "\n"
+
+
 def main():
-    parser = argparse.ArgumentParser(description="gbox - Quick inference tool for LiteRT-LM (context window maxes out at 4096 tokens). Server includes /models endpoint.")
+    examples_block = """\
+Examples:
+  Quick prompt:
+    gbox "Explain transformers in two sentences."
+
+  Pipe stdin (text, code, or a PDF) into the prompt:
+    cat report.pdf | gbox "Summarize the key findings."
+    git diff | gbox "Write a commit message for these changes."
+
+  Multimodal:
+    gbox --image screenshot.png "What's in this image?"
+    gbox --audio call.wav "Transcribe verbatim."
+
+  Tools (require --presets to point at a preset module; see bundled preset below):
+    gbox --presets preset.py --tools mac "Summarize my Finder selection."
+    gbox --presets preset.py --tools fs,web "Find local TODOs and open the top GitHub issue."
+    gbox --presets preset.py "Run all tools available in the preset."
+
+  Higher-capability model + JSON output + clipboard:
+    gbox --high --json -c "Extract entities from: Acme hired Jane in Tokyo."
+
+  Persistent multi-turn session:
+    gbox --session brainstorm "Let's plan a launch checklist."
+    gbox --session brainstorm "Add a rollback step."
+
+  Fabric system prompt + context:
+    gbox --system-file summarize --context project-notes "Summarize."
+
+  Server mode (start once, then requests auto-divert to it):
+    gbox --server start
+    gbox --server status
+    gbox "Now this runs against the warm server."
+
+  Pick a specific model (any of these forms):
+    gbox --model gemma-4-E4B-it "Why is the sky blue?"
+    gbox --model ~/.litert-lm/models/my-custom.litertlm "Prompt..."
+    gbox gemma-4-E4B-it "Why is the sky blue?"          # positional form also works
+"""
+    parser = argparse.ArgumentParser(
+        description="gbox - Quick inference tool for LiteRT-LM (context window maxes out at 4096 tokens). Server includes /models endpoint.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=examples_block + _describe_model_storage() + _describe_bundled_preset(),
+    )
     parser.add_argument("model_or_prompt", nargs="?", help="Model ID, path, or the prompt itself")
     parser.add_argument("prompt_parts", nargs="*", help="Remaining parts of the prompt if first arg was a model")
     parser.add_argument("--default", action="store_true", help="Use gemma-4-E2B-it model (default)")
     parser.add_argument("--high", action="store_true", help="Use gemma-4-E4B-it model")
+    parser.add_argument("--model", help="Model name or path (e.g. gemma-4-E4B-it, or any .litertlm file in a search path). See 'Model storage' section below for search order.")
     parser.add_argument("--prompt", help="The user prompt (overrides positional prompt)")
     parser.add_argument("--presets", help="Path to preset.py")
     parser.add_argument("--tools", help="Comma-separated list of tools or sets to enable")
@@ -579,10 +686,11 @@ def main():
     parser.add_argument("--server", nargs="?", const="start", choices=["start", "stop", "status", "logs", "config", "models"], help="Server control: start, stop, status, logs, config, models")
     parser.add_argument("--_internal_run", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, default=8955, help="Server port (default: 8955)")
-    parser.add_argument("--backend", default=default_backend, choices=["cpu", "gpu"])
-    parser.add_argument("--vision-backend", default=default_backend, choices=["cpu", "gpu"])
-    parser.add_argument("--audio-backend", default="cpu", choices=["cpu", "gpu"])
+    parser.add_argument("--backend", default=default_backend, choices=["cpu", "gpu"], help=f"Inference backend (default: {default_backend} — gpu on Apple Silicon, cpu elsewhere)")
+    parser.add_argument("--vision-backend", default=default_backend, choices=["cpu", "gpu"], help=f"Vision backend (default: {default_backend} — gpu on Apple Silicon, cpu elsewhere)")
+    parser.add_argument("--audio-backend", default="cpu", choices=["cpu", "gpu"], help="Audio backend (default: cpu — gpu unsupported upstream, see ISSUES.md)")
     parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum context window size (input + output tokens, max 4096)")
+    parser.add_argument("--mtp", action=argparse.BooleanOptionalAction, default=None, help="Enable Multi-Token Prediction / speculative decoding. Auto: on for --backend gpu, off for cpu. Use --no-mtp to force off (e.g. for models without an MTP draft).")
     parser.add_argument("--upgrade", action="store_true", help="Upgrade litert-lm via 'uv tool upgrade litert-lm'")
     try:
         _litert_version = importlib.metadata.version("litert-lm")
@@ -699,18 +807,25 @@ def main():
     positional_prompt = ""
 
     if args.model_or_prompt:
-        resolved = resolve_model_path(args.model_or_prompt)
-        if os.path.exists(resolved) or args.model_or_prompt in ["gemma-4-E2B-it", "gemma-4-E4B-it"]:
-            selected_model = args.model_or_prompt
-            if args.prompt_parts:
-                positional_prompt = " ".join(args.prompt_parts)
-        else:
+        # If --model was given, the positional is always prompt (no model probe).
+        if args.model:
             positional_prompt = " ".join([args.model_or_prompt] + args.prompt_parts)
+        else:
+            resolved = resolve_model_path(args.model_or_prompt)
+            if os.path.exists(resolved) or args.model_or_prompt in ["gemma-4-E2B-it", "gemma-4-E4B-it"]:
+                selected_model = args.model_or_prompt
+                if args.prompt_parts:
+                    positional_prompt = " ".join(args.prompt_parts)
+            else:
+                positional_prompt = " ".join([args.model_or_prompt] + args.prompt_parts)
 
+    # Precedence: --high > --default > --model > positional model arg
+    if args.model:
+        selected_model = args.model
+    if args.default:
+        selected_model = "gemma-4-E2B-it"
     if args.high:
         selected_model = "gemma-4-E4B-it"
-    elif args.default:
-        selected_model = "gemma-4-E2B-it"
 
     is_high_requested = (selected_model == "gemma-4-E4B-it") or args.high
     litert_lm.set_min_log_severity(litert_lm.LogSeverity.ERROR)
@@ -843,6 +958,10 @@ def main():
     v_backend = litert_lm.Backend.GPU if args.vision_backend == "gpu" else litert_lm.Backend.CPU
     a_backend = litert_lm.Backend.GPU if args.audio_backend == "gpu" else litert_lm.Backend.CPU
 
+    # MTP (speculative decoding): auto-on for GPU per upstream guidance, opt-out via --no-mtp.
+    mtp_enabled = args.mtp if args.mtp is not None else (args.backend == "gpu")
+    args._mtp_resolved = mtp_enabled
+
     try:
         with suppress_stderr():
             engine = litert_lm.Engine(
@@ -851,8 +970,9 @@ def main():
                 vision_backend=v_backend,
                 audio_backend=a_backend,
                 max_num_tokens=args.max_tokens,
-                cache_dir=os.path.dirname(model_path)
-            )        
+                cache_dir=os.path.dirname(model_path),
+                enable_speculative_decoding=mtp_enabled,
+            )
         
         if args.server:
             run_server(args, engine, selected_model, tools, system_msg)

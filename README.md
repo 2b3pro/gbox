@@ -10,7 +10,7 @@
 
 - 🆓 **Free forever** — no subscription, no token billing. The models are open-weight and downloaded once.
 - 🏠 **Fully local & private** — every byte of your prompts, files, screenshots, and audio stays on your machine. Nothing leaves the box.
-- ⚡ **Fast on Apple Silicon** — backed by Google's LiteRT-LM with Metal GPU acceleration, plus an optional warm-server mode that eliminates the model-load penalty.
+- ⚡ **Fast on Apple Silicon** — backed by Google's LiteRT-LM with Metal GPU acceleration, **Multi-Token Prediction (MTP) on by default** for GPU decode-speed gains, plus an optional warm-server mode that eliminates the model-load penalty.
 - 🧰 **Real tool calling** — the model can read your filesystem, run AppleScript, query SQLite, OCR images, control macOS, search the web, and more — gated by an explicit `--tools` allowlist.
 - 🔌 **OpenAI-compatible API** — drop-in `/v1/chat/completions` endpoint so existing OpenAI client code works unchanged against your local model.
 - 🐚 **Unix-native** — pipes, stdin, exit codes, streaming. Composes with the rest of your shell.
@@ -31,6 +31,7 @@
 - **Modular Tooling**: Enable specific tools or predefined tool sets from a modular `tools/` package.
 - **Context Awareness**: Inject conversation history via JSONL or raw text context via Markdown using the `--context` flag.
 - **Smart Recommendations**: Suggests using the `--high` (4B) model when complex tools (like AppleScript, SQLite, or macOS system automation) are requested.
+- **Multi-Token Prediction (MTP)**: Speculative-decoding acceleration auto-enabled on GPU per [LiteRT-LM upstream guidance](https://ai.google.dev/edge/litert-lm/python#mtp). Opt out with `--no-mtp` for models that don't ship a draft head.
 - **Unix-Friendly**: Designed for piping and shell automation.
 
 ## Installation
@@ -218,6 +219,7 @@ curl http://localhost:8955/v1/chat/completions \
 | `--vision-backend` | Vision backend (`cpu` or `gpu`). Defaults to `gpu` on Apple Silicon. |
 | `--audio-backend` | Audio backend (`cpu` or `gpu`). Defaults to `cpu`. |
 | `--max-tokens` | KV cache size (default: 4096). |
+| `--mtp` / `--no-mtp` | Toggle Multi-Token Prediction (speculative decoding). Defaults: on for `--backend gpu`, off for `cpu`. Force off if your model lacks an MTP draft head. |
 
 ---
 
