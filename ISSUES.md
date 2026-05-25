@@ -50,3 +50,21 @@ This file tracks known limitations, hardware-specific constraints, and upstream 
 - **Reference:** [LiteRT-LM Issue #2093](https://github.com/google-ai-edge/LiteRT-LM/issues/2093)
 - **Description:** CLI fails with `NameError: convert is not defined` during automatic model conversion.
 - **Impact:** Low. May affect users relying on automatic model conversions on first run.
+
+### MTP (speculative decoding) is SLOWER on Apple Silicon Metal (measured 2026-05-24)
+
+- **Upstream claim:** [litert-lm Python docs](https://ai.google.dev/edge/litert-lm/python#mtp) state Multi-Token Prediction is *"universally recommended for all tasks on GPU backends."*
+- **Measured reality** on Apple Silicon (M2-class, Gemma 4 `.litertlm` bundles, Metal GPU backend, litert-lm 0.12.0): MTP is **consistently slower** than non-MTP decode on this platform.
+- **Methodology:** warm-server mode (post-init, decode-only), identical prompts, `stream=false`, three timed runs per config, gbox v0.5.0.
+- **Results:**
+
+  | Model | Prompt | Output | MTP OFF | MTP ON | Verdict |
+  |-------|--------|--------|---------|--------|---------|
+  | E2B   | count 1→50          | 140 chars (identical)  | 1.945 s     | 2.010 s     | MTP ~3% slower |
+  | E2B   | 300-word essay      | ~1800 chars (varies)   | 377 chars/s | 322 chars/s | MTP ~15% slower (chars/s) |
+  | E4B   | 300-word essay      | 1712 chars (identical) | **228 chars/s** | **152 chars/s** | **MTP ~33% slower / 1.5× wall clock** |
+
+- **Hypothesis:** the "GPU" recommendation is CUDA-centric. Metal's speculative-decoding code path either has high verification overhead or the Gemma 4 draft head's acceptance rate on Metal is too low for the savings to beat overhead.
+- **Action in gbox (v0.5.1+):** MTP default is now **OFF on Darwin/Metal** regardless of `--backend`. Default remains ON for non-Darwin GPU (preserves upstream guidance for Linux CUDA / WebGPU). Override with `--mtp` to force on, `--no-mtp` to force off.
+- **Reproduce:** `./gbox --high --no-mtp --port 8956 --server start`, time a long-essay prompt, then `--server restart` with `--mtp` and compare.
+- **TODO:** file upstream issue once a clean repro script + multi-machine data exist.

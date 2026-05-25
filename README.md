@@ -10,7 +10,7 @@
 
 - 🆓 **Free forever** — no subscription, no token billing. The models are open-weight and downloaded once.
 - 🏠 **Fully local & private** — every byte of your prompts, files, screenshots, and audio stays on your machine. Nothing leaves the box.
-- ⚡ **Fast on Apple Silicon** — backed by Google's LiteRT-LM with Metal GPU acceleration, **Multi-Token Prediction (MTP) on by default** for GPU decode-speed gains, plus an optional warm-server mode that eliminates the model-load penalty.
+- ⚡ **Fast on Apple Silicon** — backed by Google's LiteRT-LM with Metal GPU acceleration, plus an optional warm-server mode that eliminates the model-load penalty.
 - 🧰 **Real tool calling** — the model can read your filesystem, run AppleScript, query SQLite, OCR images, control macOS, search the web, and more — gated by an explicit `--tools` allowlist.
 - 🔌 **OpenAI-compatible API** — drop-in `/v1/chat/completions` endpoint so existing OpenAI client code works unchanged against your local model.
 - 🐚 **Unix-native** — pipes, stdin, exit codes, streaming. Composes with the rest of your shell.
@@ -31,7 +31,7 @@
 - **Modular Tooling**: Enable specific tools or predefined tool sets from a modular `tools/` package.
 - **Context Awareness**: Inject conversation history via JSONL or raw text context via Markdown using the `--context` flag.
 - **Smart Recommendations**: Suggests using the `--high` (4B) model when complex tools (like AppleScript, SQLite, or macOS system automation) are requested.
-- **Multi-Token Prediction (MTP)**: Speculative-decoding acceleration auto-enabled on GPU per [LiteRT-LM upstream guidance](https://ai.google.dev/edge/litert-lm/python#mtp). Opt out with `--no-mtp` for models that don't ship a draft head.
+- **Multi-Token Prediction (MTP)**: `--mtp` / `--no-mtp` toggle for LiteRT-LM speculative decoding. Default **off on Apple Silicon Metal** (measured slower — see [ISSUES.md](ISSUES.md)), **on for non-Darwin GPU** per [upstream guidance](https://ai.google.dev/edge/litert-lm/python#mtp), off for CPU.
 - **Unix-Friendly**: Designed for piping and shell automation.
 
 ## Installation
@@ -157,12 +157,13 @@ When you run a standard `gbox` command, it will automatically check if a compati
 If the server is incompatible (e.g., you requested `--high` but the server is running the default model), `gbox` will fall back to local execution. Use the `--no-server` flag to force local execution regardless of server status.
 
 ### Control Subcommands
-- **Start**: `gbox --server start` (or simply `gbox --server`) - Daemonizes the process.
-- **Stop**: `gbox --server stop` - Terminates the background process.
-- **Status**: `gbox --server status` - Checks if the server is running.
-- **Logs**: `gbox --server logs` - Tails the server output from `~/.gbox/server.log`.
-- **Config**: `gbox --server config` - Prints the running server's active model, tools, and limits (proxies `GET /config`).
-- **Models**: `gbox --server models` - Lists models the running server can load (proxies `GET /models`).
+- **Start**: `gbox --server start` (or simply `gbox --server`) — Daemonizes the process. Refuses to start if another gbox is already on the port (idempotent) or if a non-gbox process holds the port (safety).
+- **Stop**: `gbox --server stop` — Terminates the background process. Falls back to `lsof` port discovery if the pid file is stale or missing.
+- **Restart**: `gbox --server restart` — Stop, wait for the port to free, then start. Useful after code or config changes.
+- **Status**: `gbox --server status` — Reports whether a gbox server is alive on the port; flags inconsistent pid-file/port states explicitly instead of guessing.
+- **Logs**: `gbox --server logs` — Prints `~/.gbox/server.log`.
+- **Config**: `gbox --server config` — Prints the running server's active model, MTP state, backends, tools, and limits (proxies `GET /config`).
+- **Models**: `gbox --server models` — Lists models the running server can load (proxies `GET /models`).
 
 ### API Usage
 The server listens on port **8955** by default and provides OpenAI-compatible endpoints:
@@ -219,7 +220,7 @@ curl http://localhost:8955/v1/chat/completions \
 | `--vision-backend` | Vision backend (`cpu` or `gpu`). Defaults to `gpu` on Apple Silicon. |
 | `--audio-backend` | Audio backend (`cpu` or `gpu`). Defaults to `cpu`. |
 | `--max-tokens` | KV cache size (default: 4096). |
-| `--mtp` / `--no-mtp` | Toggle Multi-Token Prediction (speculative decoding). Defaults: on for `--backend gpu`, off for `cpu`. Force off if your model lacks an MTP draft head. |
+| `--mtp` / `--no-mtp` | Toggle Multi-Token Prediction (speculative decoding). Defaults: **off on Apple Silicon Metal** (measured slower), **on for non-Darwin GPU**, off for CPU. See [ISSUES.md](ISSUES.md) for benchmark data. |
 
 ---
 

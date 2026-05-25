@@ -33,7 +33,7 @@ import urllib.request
 import urllib.error
 from contextlib import contextmanager
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 @contextmanager
 def suppress_stderr():
@@ -683,14 +683,14 @@ Examples:
     parser.add_argument("--stream", action="store_true", help="Stream the response in real-time")
     parser.add_argument("-c", "--clipboard", action="store_true", help="Copy the final result to the macOS clipboard")
     parser.add_argument("--no-server", action="store_true", help="Disable automatic server diversion")
-    parser.add_argument("--server", nargs="?", const="start", choices=["start", "stop", "status", "logs", "config", "models"], help="Server control: start, stop, status, logs, config, models")
+    parser.add_argument("--server", nargs="?", const="start", choices=["start", "stop", "restart", "status", "logs", "config", "models"], help="Server control: start, stop, restart, status, logs, config, models")
     parser.add_argument("--_internal_run", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, default=8955, help="Server port (default: 8955)")
     parser.add_argument("--backend", default=default_backend, choices=["cpu", "gpu"], help=f"Inference backend (default: {default_backend} — gpu on Apple Silicon, cpu elsewhere)")
     parser.add_argument("--vision-backend", default=default_backend, choices=["cpu", "gpu"], help=f"Vision backend (default: {default_backend} — gpu on Apple Silicon, cpu elsewhere)")
     parser.add_argument("--audio-backend", default="cpu", choices=["cpu", "gpu"], help="Audio backend (default: cpu — gpu unsupported upstream, see ISSUES.md)")
     parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum context window size (input + output tokens, max 4096)")
-    parser.add_argument("--mtp", action=argparse.BooleanOptionalAction, default=None, help="Enable Multi-Token Prediction / speculative decoding. Auto: on for --backend gpu, off for cpu. Use --no-mtp to force off (e.g. for models without an MTP draft).")
+    parser.add_argument("--mtp", action=argparse.BooleanOptionalAction, default=None, help="Multi-Token Prediction / speculative decoding. Default: OFF on Apple Silicon Metal (measured ~50%% slower on E4B+gpu, see ISSUES.md); ON for non-Darwin GPU per upstream guidance; OFF for cpu. Override with --mtp / --no-mtp.")
     parser.add_argument("--upgrade", action="store_true", help="Upgrade litert-lm via 'uv tool upgrade litert-lm'")
     try:
         _litert_version = importlib.metadata.version("litert-lm")
@@ -718,40 +718,127 @@ Examples:
 
     # Server control logic
     if args.server and not args._internal_run:
+        import subprocess
+        import time as _time
         server_dir = os.path.expanduser("~/.gbox")
         pid_file = os.path.join(server_dir, "server.pid")
         log_file = os.path.join(server_dir, "server.log")
-        
-        if args.server == "status":
+
+        def _probe_server_state(port):
+            """Unified view of server state across pid file, port binding, and HTTP /config.
+            Returns dict with: pid_file_pid, pid_file_alive, port_pid, port_cmdline,
+            is_gbox_on_port, config_responds."""
+            state = {
+                "pid_file_pid": None,
+                "pid_file_alive": False,
+                "port_pid": None,
+                "port_cmdline": "",
+                "is_gbox_on_port": False,
+                "config_responds": False,
+            }
             if os.path.exists(pid_file):
-                with open(pid_file, "r") as f:
-                    pid = int(f.read().strip())
                 try:
-                    os.kill(pid, 0)
-                    print(f"Server is running (PID: {pid}).")
-                    sys.exit(0)
-                except ProcessLookupError:
-                    print("Server is NOT running (stale PID file).")
-                    os.remove(pid_file)
-                    sys.exit(1)
-            print("Server is NOT running.")
-            sys.exit(1)
-            
-        elif args.server == "stop":
-            if os.path.exists(pid_file):
-                with open(pid_file, "r") as f:
-                    pid = int(f.read().strip())
-                try:
-                    os.kill(pid, 15)
-                    print(f"Stopped server (PID: {pid}).")
-                except ProcessLookupError:
-                    print("Server was not running.")
+                    with open(pid_file, "r") as f:
+                        state["pid_file_pid"] = int(f.read().strip())
+                    os.kill(state["pid_file_pid"], 0)
+                    state["pid_file_alive"] = True
+                except (ProcessLookupError, ValueError, PermissionError):
+                    pass
+            try:
+                r = subprocess.run(
+                    ["lsof", "-iTCP:" + str(port), "-sTCP:LISTEN", "-P", "-n", "-t"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                pids = [int(p) for p in r.stdout.split() if p.strip().isdigit()]
+                if pids:
+                    state["port_pid"] = pids[0]
+                    r2 = subprocess.run(
+                        ["ps", "-p", str(state["port_pid"]), "-o", "command="],
+                        capture_output=True, text=True, timeout=2,
+                    )
+                    state["port_cmdline"] = r2.stdout.strip()
+                    state["is_gbox_on_port"] = "gbox" in state["port_cmdline"].lower()
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+            try:
+                with urllib.request.urlopen(f"http://localhost:{port}/config", timeout=0.5) as resp:
+                    resp.read()
+                state["config_responds"] = True
+            except Exception:
+                pass
+            return state
+
+        def _heal_pid_file(state):
+            """Reconcile pid file with reality if a gbox server is on the port."""
+            if state["is_gbox_on_port"] and state["pid_file_pid"] != state["port_pid"]:
+                os.makedirs(server_dir, exist_ok=True)
+                with open(pid_file, "w") as f:
+                    f.write(str(state["port_pid"]))
+
+        def _do_stop(state):
+            """Returns (stopped_pid_or_None, message)."""
+            target = state["port_pid"] if state["is_gbox_on_port"] else (state["pid_file_pid"] if state["pid_file_alive"] else None)
+            if target is None:
                 if os.path.exists(pid_file):
                     os.remove(pid_file)
+                return None, "Server is not running."
+            try:
+                os.kill(target, 15)
+            except ProcessLookupError:
+                pass
+            if os.path.exists(pid_file):
+                os.remove(pid_file)
+            return target, f"Stopped server (PID: {target})."
+
+        def _wait_for_port_free(port, timeout=8.0):
+            deadline = _time.time() + timeout
+            while _time.time() < deadline:
+                if _probe_server_state(port)["port_pid"] is None:
+                    return True
+                _time.sleep(0.2)
+            return False
+
+        def _spawn_daemon():
+            os.makedirs(server_dir, exist_ok=True)
+            cmd = [sys.executable, os.path.abspath(__file__)]
+            new_args = sys.argv[1:]
+            if "--server" not in new_args:
+                new_args.extend(["--server", "start"])
+            # Drop bare 'restart' if present — daemon should see 'start'
+            new_args = ["start" if a == "restart" else a for a in new_args]
+            new_args.append("--_internal_run")
+            with open(log_file, "a") as log:
+                log.write(f"\n--- Server Starting at {datetime.datetime.now()} ---\n")
+                subprocess.Popen(cmd + new_args, stdout=log, stderr=log, start_new_session=True)
+            print(f"Server started in background. Logs: {log_file}")
+
+        if args.server == "status":
+            state = _probe_server_state(args.port)
+            _heal_pid_file(state)
+            if state["config_responds"] and state["is_gbox_on_port"]:
+                print(f"Server is running on port {args.port} (PID: {state['port_pid']}).")
                 sys.exit(0)
-            print("Server is not running.")
+            if state["port_pid"] and not state["is_gbox_on_port"]:
+                print(f"Server is NOT running on port {args.port}.")
+                print(f"  Port held by non-gbox process: PID {state['port_pid']} ({state['port_cmdline']})", file=sys.stderr)
+                sys.exit(1)
+            if state["pid_file_alive"]:
+                print(f"Server in inconsistent state: pid file says PID {state['pid_file_pid']} alive, but nothing on port {args.port}.", file=sys.stderr)
+                sys.exit(1)
+            if state["pid_file_pid"]:
+                print("Server is NOT running (stale PID file removed).")
+                if os.path.exists(pid_file):
+                    os.remove(pid_file)
+                sys.exit(1)
+            print(f"Server is NOT running on port {args.port}.")
+            sys.exit(1)
+
+        elif args.server == "stop":
+            state = _probe_server_state(args.port)
+            _, msg = _do_stop(state)
+            print(msg)
             sys.exit(0)
-            
+
         elif args.server == "logs":
             if os.path.exists(log_file):
                 with open(log_file, "r") as f:
@@ -774,32 +861,35 @@ Examples:
                 print(body)
             sys.exit(0)
 
-        elif args.server == "start":
-            if os.path.exists(pid_file):
-                with open(pid_file, "r") as f:
-                    pid = int(f.read().strip())
-                try:
-                    os.kill(pid, 0)
-                    print(f"Server is already running (PID: {pid}).")
-                    sys.exit(0)
-                except ProcessLookupError:
-                    os.remove(pid_file)
-            
-            os.makedirs(server_dir, exist_ok=True)
-            # Daemonize
-            import subprocess
-            cmd = [sys.executable, os.path.abspath(__file__)]
-            # Forward all relevant args but add _internal_run
-            new_args = sys.argv[1:]
-            if "--server" not in new_args:
-                new_args.extend(["--server", "start"])
-            new_args.append("--_internal_run")
-            
-            with open(log_file, "a") as log:
-                log.write(f"\n--- Server Starting at {datetime.datetime.now()} ---\n")
-                subprocess.Popen(cmd + new_args, stdout=log, stderr=log, start_new_session=True)
-            
-            print(f"Server started in background. Logs: {log_file}")
+        elif args.server in ("start", "restart"):
+            state = _probe_server_state(args.port)
+            _heal_pid_file(state)
+
+            if args.server == "restart":
+                stopped, msg = _do_stop(state)
+                print(msg)
+                if stopped is not None and not _wait_for_port_free(args.port):
+                    print(f"Warning: port {args.port} still held after stop — start may fail.", file=sys.stderr)
+                state = _probe_server_state(args.port)
+
+            # Already-running gbox on the port → no-op
+            if state["config_responds"] and state["is_gbox_on_port"]:
+                print(f"Server already running on port {args.port} (PID: {state['port_pid']}). Use --server restart to recycle.")
+                sys.exit(0)
+            # Non-gbox process on the port → refuse, do not steal the port
+            if state["port_pid"] and not state["is_gbox_on_port"]:
+                print(f"Error: Port {args.port} is in use by non-gbox PID {state['port_pid']} ({state['port_cmdline']}). Refusing to start.", file=sys.stderr)
+                print(f"  Inspect: lsof -iTCP:{args.port} -sTCP:LISTEN -P -n", file=sys.stderr)
+                sys.exit(1)
+            # Pid file says alive but port empty → ambiguous, refuse
+            if state["pid_file_alive"] and not state["port_pid"]:
+                print(f"Error: pid file claims PID {state['pid_file_pid']} alive but nothing on port {args.port}. Resolve manually with --server stop.", file=sys.stderr)
+                sys.exit(1)
+            # Stale pid file → clean
+            if state["pid_file_pid"] and not state["pid_file_alive"] and os.path.exists(pid_file):
+                os.remove(pid_file)
+
+            _spawn_daemon()
             sys.exit(0)
 
     # Model and Prompt Resolution Logic
@@ -958,8 +1048,17 @@ Examples:
     v_backend = litert_lm.Backend.GPU if args.vision_backend == "gpu" else litert_lm.Backend.CPU
     a_backend = litert_lm.Backend.GPU if args.audio_backend == "gpu" else litert_lm.Backend.CPU
 
-    # MTP (speculative decoding): auto-on for GPU per upstream guidance, opt-out via --no-mtp.
-    mtp_enabled = args.mtp if args.mtp is not None else (args.backend == "gpu")
+    # MTP (speculative decoding) default resolution:
+    #   --mtp / --no-mtp explicit  → honored
+    #   Darwin (Apple Silicon Metal) → OFF (benchmarked ~50% slower on E4B, see ISSUES.md)
+    #   Other GPU                    → ON  (matches upstream "universally recommended on GPU")
+    #   CPU                          → OFF
+    if args.mtp is not None:
+        mtp_enabled = args.mtp
+    elif args.backend == "gpu" and platform.system() != "Darwin":
+        mtp_enabled = True
+    else:
+        mtp_enabled = False
     args._mtp_resolved = mtp_enabled
 
     try:
