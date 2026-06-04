@@ -31,6 +31,7 @@
 - **Modular Tooling**: Enable specific tools or predefined tool sets from a modular `tools/` package.
 - **Context Awareness**: Inject conversation history via JSONL or raw text context via Markdown using the `--context` flag.
 - **Smart Recommendations**: Suggests using the `--high` (4B) model when complex tools (like AppleScript, SQLite, or macOS system automation) are requested.
+- **Bring Your Own Model**: Reference any model imported via `litert-lm import` by its shorthand ID (e.g. `--model qwen3-4b`), or point `--model` at any `.litertlm` file. gbox auto-detects each bundle's modalities (text/vision/audio) and MTP draft head, so text-only models like Qwen3 just work — no manual backend flags. Inspect any model with `gbox modelinfo <model>`.
 - **Multi-Token Prediction (MTP)**: `--mtp` / `--no-mtp` toggle for LiteRT-LM speculative decoding. Default **off on Apple Silicon Metal** (measured slower — see [ISSUES.md](ISSUES.md)), **on for non-Darwin GPU** per [upstream guidance](https://ai.google.dev/edge/litert-lm/python#mtp), off for CPU.
 - **Unix-Friendly**: Designed for piping and shell automation.
 
@@ -104,6 +105,29 @@ gbox --high --prompt "Explain quantum decoherence."
 
 # Explicitly use the 2B model
 gbox --default --prompt "Who are you?"
+```
+
+#### Using imported / custom models
+Models imported with the LiteRT-LM CLI (`litert-lm import <source> <model-id>`) are stored as `~/.litert-lm/models/<model-id>/model.litertlm`. Reference them by their shorthand ID — gbox resolves the registry layout for you:
+```bash
+# Shorthand ID from `litert-lm import` (resolves <id>/model.litertlm)
+gbox --model qwen3-4b "What is gravitronics?"
+
+# Or any .litertlm file by path
+gbox --model ~/.litert-lm/models/my-custom.litertlm "Prompt..."
+```
+gbox inspects each bundle before loading and only wires up the encoders it actually contains, so a **text-only** model (e.g. Qwen3) runs without you having to disable the vision/audio backends. Models lacking an MTP draft head also auto-disable speculative decoding.
+
+#### Inspecting a model
+Use `modelinfo` to see a model's modalities, format, size, and MTP support without loading it:
+```bash
+gbox modelinfo qwen3-4b
+# Model:      qwen3-4b
+# Path:       /Users/you/.litert-lm/models/qwen3-4b/model.litertlm
+# Size:       5.3 GB
+# Format:     LiteRT-LM 1.5.0
+# Modalities: text
+# MTP draft:  no
 ```
 
 ### Selective Tools
@@ -203,6 +227,7 @@ curl http://localhost:8955/v1/chat/completions \
 
 | Flag | Description |
 |------|-------------|
+| `--model` | Model ID or path: a `--high`/`--default` name, a `litert-lm import` shorthand (e.g. `qwen3-4b`), or any `.litertlm` file. Also usable positionally (`gbox <model> "prompt"`). |
 | `--prompt` | The user text prompt (or path to a prompt file). |
 | `--image` | Path to an image file. |
 | `--audio` | Path to an audio file. |

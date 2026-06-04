@@ -33,7 +33,7 @@ import urllib.request
 import urllib.error
 from contextlib import contextmanager
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 
 @contextmanager
 def suppress_stderr():
@@ -105,29 +105,52 @@ def load_preset(path, requested_tools=None):
 
     return unique_tools, system_instruction
 
+def _resolve_litertlm_in_dir(d):
+    """If `d` is a litert-lm registry model dir, return the .litertlm file inside.
+
+    The litert-lm CLI (`litert-lm import SOURCE MODEL_ID`) stores imported models
+    as `<storage>/<model-id>/model.litertlm`, so a shorthand like `qwen3-4b`
+    resolves to a directory. The Engine needs the .litertlm *file*, not the dir.
+    Prefer `model.litertlm`; otherwise fall back to the first .litertlm found.
+    Returns None if `d` is not a directory or holds no .litertlm.
+    """
+    if not os.path.isdir(d):
+        return None
+    preferred = os.path.join(d, "model.litertlm")
+    if os.path.isfile(preferred):
+        return preferred
+    try:
+        for child in sorted(os.listdir(d)):
+            if child.endswith(".litertlm") and os.path.isfile(os.path.join(d, child)):
+                return os.path.join(d, child)
+    except OSError:
+        pass
+    return None
+
 def resolve_model_path(model_ref):
     """Resolves model reference to an absolute path."""
     if os.path.exists(model_ref):
-        return os.path.abspath(model_ref)
-    
+        ref = os.path.abspath(model_ref)
+        return _resolve_litertlm_in_dir(ref) or ref
+
     storage_paths = [
         os.path.expanduser("~/.litert-lm/models"),
         os.path.expanduser("~/.config/litert-lm/models"),
     ]
-    
+
     env_path = os.getenv("LITERT_LM_MODELS_DIR")
     if env_path:
         storage_paths.insert(0, os.path.expanduser(env_path))
-    
+
     for base in storage_paths:
         target = os.path.join(base, model_ref)
         if os.path.exists(target):
-            return target
+            return _resolve_litertlm_in_dir(target) or target
         if not target.endswith(".litertlm"):
             target_ext = target + ".litertlm"
             if os.path.exists(target_ext):
                 return target_ext
-                
+
     return model_ref
 
 def get_available_models():
@@ -165,6 +188,100 @@ def get_available_models():
         except Exception:
             continue
     return sorted(list(models))
+
+def _peek_model(model_path):
+    """Run litert-lm-peek on a .litertlm bundle and return parsed metadata.
+
+    Returns {"version": str|None, "types": set[str], "constraints": dict[str,str]}
+    or None if the path isn't a readable .litertlm or peek is unavailable/errors.
+    `types` holds the bundle's `model_type` strings (e.g. tf_lite_vision_encoder,
+    tf_lite_audio_encoder_hw, tf_lite_mtp_drafter); `constraints` maps a type to
+    its declared backend_constraint when present. peek is a metadata-only read
+    (~0.1s even on multi-GB bundles), so this is cheap to call before Engine init.
+    """
+    if not (model_path.endswith(".litertlm") and os.path.isfile(model_path)):
+        return None
+    peek = os.path.join(os.path.dirname(sys.executable), "litert-lm-peek")
+    if not os.path.isfile(peek):
+        return None
+    import subprocess
+    try:
+        out = subprocess.run(
+            [peek, "--litertlm_file", model_path],
+            capture_output=True, text=True, timeout=20,
+        ).stdout
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    info = {"version": None, "types": set(), "constraints": {}}
+    last_type = None
+    for line in out.splitlines():
+        s = line.strip()
+        if s.startswith("LiteRT-LM Version:"):
+            info["version"] = s.split(":", 1)[1].strip()
+        elif "model_type, Value (String):" in s:
+            t = s.split("model_type, Value (String):", 1)[1].strip()
+            info["types"].add(t)
+            last_type = t
+        elif "backend_constraint, Value (String):" in s and last_type:
+            info["constraints"][last_type] = s.split("backend_constraint, Value (String):", 1)[1].strip()
+    return info
+
+def detect_model_capabilities(model_path):
+    """Report which encoders/heads a .litertlm bundle contains.
+
+    Returns {"vision": bool, "audio": bool, "mtp": bool}. The LiteRT-LM runtime
+    raises NOT_FOUND at conversation creation if a vision/audio backend is wired
+    up for a bundle lacking that encoder (e.g. an imported text-only Qwen3), and
+    Engine init fails if speculative decoding is requested with no MTP draft head.
+    Best-effort: if peek is missing/errors or prints no model_type lines, assume
+    full multimodal so behavior is unchanged for the Gemma 4 bundles.
+    """
+    caps = {"vision": True, "audio": True, "mtp": True}
+    info = _peek_model(model_path)
+    if info and info["types"]:
+        caps["vision"] = "tf_lite_vision_encoder" in info["types"]
+        caps["audio"] = "tf_lite_audio_encoder_hw" in info["types"]
+        caps["mtp"] = "tf_lite_mtp_drafter" in info["types"]
+    return caps
+
+def print_model_info(model_ref):
+    """Print a capability/metadata summary for `gbox modelinfo <model>`.
+
+    Returns a process exit code (0 ok, 1 if the model can't be resolved).
+    """
+    path = resolve_model_path(model_ref)
+    if not (path.endswith(".litertlm") and os.path.isfile(path)):
+        print(f"Error: could not resolve '{model_ref}' to a .litertlm file.", file=sys.stderr)
+        print("Check your model storage paths (run 'gbox --help' for search order).", file=sys.stderr)
+        return 1
+
+    def _human(n):
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024:
+                return f"{n:.1f} {unit}"
+            n /= 1024
+        return f"{n:.1f} PB"
+
+    print(f"Model:      {model_ref}")
+    print(f"Path:       {path}")
+    print(f"Size:       {_human(os.path.getsize(path))}")
+    info = _peek_model(path)
+    if not info:
+        print("Metadata:   (litert-lm-peek unavailable — cannot read bundle sections)")
+        return 0
+    if info["version"]:
+        print(f"Format:     LiteRT-LM {info['version']}")
+    modalities = ["text"]
+    if "tf_lite_vision_encoder" in info["types"]:
+        modalities.append("vision")
+    if "tf_lite_audio_encoder_hw" in info["types"]:
+        modalities.append("audio")
+    print(f"Modalities: {', '.join(modalities)}")
+    print(f"MTP draft:  {'yes' if 'tf_lite_mtp_drafter' in info['types'] else 'no'}")
+    if info["constraints"]:
+        cons = ", ".join(f"{k.replace('tf_lite_', '')}={v}" for k, v in sorted(info["constraints"].items()))
+        print(f"Backend constraints: {cons}")
+    return 0
 
 def resolve_fabric_resource(resource_type, name):
     """Resolves a named resource from the fabric directory."""
@@ -653,8 +770,12 @@ Examples:
 
   Pick a specific model (any of these forms):
     gbox --model gemma-4-E4B-it "Why is the sky blue?"
+    gbox --model qwen3-4b "What is gravitronics?"        # shorthand from 'litert-lm import'
     gbox --model ~/.litert-lm/models/my-custom.litertlm "Prompt..."
     gbox gemma-4-E4B-it "Why is the sky blue?"          # positional form also works
+
+  Inspect a model's modalities / format without loading it:
+    gbox modelinfo qwen3-4b
 """
     parser = argparse.ArgumentParser(
         description="gbox - Quick inference tool for LiteRT-LM (context window maxes out at 4096 tokens). Server includes /models endpoint.",
@@ -698,6 +819,15 @@ Examples:
         _litert_version = "unknown"
     parser.add_argument("--version", action="version", version=f"gbox {__version__} (litert-lm {_litert_version})")
     args = parser.parse_args()
+
+    # modelinfo subcommand: `gbox modelinfo <model>` — inspect a bundle's
+    # modalities, format, and MTP draft head without loading it for inference.
+    if args.model_or_prompt == "modelinfo":
+        target = args.prompt_parts[0] if args.prompt_parts else args.model
+        if not target:
+            print("Usage: gbox modelinfo <model-id-or-path>", file=sys.stderr)
+            sys.exit(2)
+        sys.exit(print_model_info(target))
 
     # Upgrade litert-lm in the venv gbox actually runs in, and exit
     if args.upgrade:
@@ -1051,9 +1181,16 @@ Examples:
 
     # Inference
     model_path = resolve_model_path(selected_model)
+    # A text-only bundle (e.g. an imported Qwen3) has no vision/audio encoder;
+    # wiring one up makes LiteRT-LM raise NOT_FOUND at conversation creation, so
+    # only enable backends the bundle actually carries.
+    caps = detect_model_capabilities(model_path)
     backend = litert_lm.Backend.GPU if args.backend == "gpu" else litert_lm.Backend.CPU
-    v_backend = litert_lm.Backend.GPU if args.vision_backend == "gpu" else litert_lm.Backend.CPU
-    a_backend = litert_lm.Backend.GPU if args.audio_backend == "gpu" else litert_lm.Backend.CPU
+    v_backend = (litert_lm.Backend.GPU if args.vision_backend == "gpu" else litert_lm.Backend.CPU) if caps["vision"] else None
+    a_backend = (litert_lm.Backend.GPU if args.audio_backend == "gpu" else litert_lm.Backend.CPU) if caps["audio"] else None
+    if not (caps["vision"] and caps["audio"]):
+        only = "+".join(["text"] + (["vision"] if caps["vision"] else []) + (["audio"] if caps["audio"] else []))
+        print(f"[info] '{selected_model}' is {only}-only; skipping absent encoder backend(s).", file=sys.stderr)
 
     # MTP (speculative decoding) default resolution:
     #   --mtp / --no-mtp explicit  → honored
@@ -1066,6 +1203,13 @@ Examples:
         mtp_enabled = True
     else:
         mtp_enabled = False
+    # MTP needs a draft head bundled in the .litertlm; enabling it without one
+    # fails Engine init. Force off for bundles that lack the drafter, even if the
+    # user passed --mtp (third-party models like Qwen3 have no draft head).
+    if mtp_enabled and not caps["mtp"]:
+        mtp_enabled = False
+        if args.mtp:
+            print(f"[info] '{selected_model}' has no MTP draft head; ignoring --mtp.", file=sys.stderr)
     args._mtp_resolved = mtp_enabled
 
     try:
