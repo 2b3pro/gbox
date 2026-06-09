@@ -51,20 +51,18 @@ This file tracks known limitations, hardware-specific constraints, and upstream 
 - **Description:** CLI fails with `NameError: convert is not defined` during automatic model conversion.
 - **Impact:** Low. May affect users relying on automatic model conversions on first run.
 
-### MTP (speculative decoding) is SLOWER on Apple Silicon Metal (measured 2026-05-24)
+### MTP (speculative decoding) on Apple Silicon Metal is model-specific
 
 - **Upstream claim:** [litert-lm Python docs](https://ai.google.dev/edge/litert-lm/python#mtp) state Multi-Token Prediction is *"universally recommended for all tasks on GPU backends."*
-- **Measured reality** on Apple Silicon (M2-class, Gemma 4 `.litertlm` bundles, Metal GPU backend, litert-lm 0.12.0): MTP is **consistently slower** than non-MTP decode on this platform.
-- **Methodology:** warm-server mode (post-init, decode-only), identical prompts, `stream=false`, three timed runs per config, gbox v0.5.0.
-- **Results:**
+- **2026-05-24 result:** Apple Silicon (M2-class, Gemma 4 `.litertlm` bundles, Metal GPU backend, litert-lm 0.12.0) showed MTP consistently slower in warm-server prompt tests, so gbox v0.5.1 disabled MTP by default on Darwin/Metal.
+- **2026-06-09 retest:** Apple M2 Pro / 32 GB, macOS 26.5.1, gbox 0.7.0, litert-lm 0.13.1, direct `litert-lm benchmark --backend gpu`, 512 prefill tokens, 256 decode tokens, 3 cold-process runs per model/config.
 
-  | Model | Prompt | Output | MTP OFF | MTP ON | Verdict |
-  |-------|--------|--------|---------|--------|---------|
-  | E2B   | count 1→50          | 140 chars (identical)  | 1.945 s     | 2.010 s     | MTP ~3% slower |
-  | E2B   | 300-word essay      | ~1800 chars (varies)   | 377 chars/s | 322 chars/s | MTP ~15% slower (chars/s) |
-  | E4B   | 300-word essay      | 1712 chars (identical) | **228 chars/s** | **152 chars/s** | **MTP ~33% slower / 1.5× wall clock** |
+  | Model | MTP OFF decode | MTP ON decode | Verdict |
+  |-------|----------------|---------------|---------|
+  | E2B   | 64.30 tok/s | 63.71 tok/s | MTP ~0.9% slower / effectively tied |
+  | E4B   | 37.50 tok/s | 39.38 tok/s | MTP ~5.0% faster |
+  | 12B   | 15.20 tok/s | 14.53 tok/s | current local bundle reports no MTP draft head; gbox disables `--mtp` |
 
-- **Hypothesis:** the "GPU" recommendation is CUDA-centric. Metal's speculative-decoding code path either has high verification overhead or the Gemma 4 draft head's acceptance rate on Metal is too low for the savings to beat overhead.
-- **Action in gbox (v0.5.1+):** MTP default is now **OFF on Darwin/Metal** regardless of `--backend`. Default remains ON for non-Darwin GPU (preserves upstream guidance for Linux CUDA / WebGPU). Override with `--mtp` to force on, `--no-mtp` to force off.
-- **Reproduce:** `./gbox --high --no-mtp --port 8956 --server start`, time a long-essay prompt, then `--server restart` with `--mtp` and compare.
+- **Action in gbox:** MTP defaults are now model-aware on Darwin/Metal: **ON for `gemma-4-E4B-it`**, OFF for E2B and other models. Default remains ON for non-Darwin GPU (preserves upstream guidance for Linux CUDA / WebGPU). Override with `--mtp` to force on, `--no-mtp` to force off; bundles without an MTP draft head still auto-disable MTP.
+- **Reproduce:** see `docs/benchmarks/mtp-metal-gpu-2026-06-09.html` for the latest benchmark report.
 - **TODO:** file upstream issue once a clean repro script + multi-machine data exist.

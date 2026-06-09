@@ -35,7 +35,7 @@ import subprocess
 import shutil
 from contextlib import contextmanager
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 @contextmanager
 def suppress_stderr():
@@ -91,6 +91,12 @@ BUILTIN_MODEL_IMPORTS = {
 MODEL_ALIASES = {
     "gemma-4-12b": ["gemma-4-12B-it", "gemma4-12b"],
     "gemma4-12b": ["gemma-4-12B-it", "gemma-4-12b"],
+}
+
+E4B_MODEL_IDS = {
+    "gemma-4-E4B-it",
+    "gemma-4-E4B-it.litertlm",
+    "gemma4-e4b",
 }
 
 def load_preset(path, requested_tools=None):
@@ -251,6 +257,15 @@ def ensure_model_available(model_ref, auto_download=True):
 
     print(f"Error: imported '{model_ref}', but could not find the .litertlm bundle afterward.", file=sys.stderr)
     sys.exit(1)
+
+def is_e4b_model_ref(model_ref, model_path):
+    """Best-effort check for the Gemma 4 E4B bundle across registry aliases."""
+    identifiers = {
+        model_ref,
+        os.path.basename(model_path),
+        os.path.basename(os.path.dirname(model_path)),
+    }
+    return bool(identifiers & E4B_MODEL_IDS)
 
 def get_available_models():
     """Returns a list of available models by scanning LiteRT-LM storage paths.
@@ -912,7 +927,7 @@ Examples:
     parser.add_argument("--vision-backend", default=default_backend, choices=["cpu", "gpu"], help=f"Vision backend (default: {default_backend} — gpu on Apple Silicon, cpu elsewhere)")
     parser.add_argument("--audio-backend", default="cpu", choices=["cpu", "gpu"], help="Audio backend (default: cpu — gpu unsupported upstream, see ISSUES.md)")
     parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum context window size (input + output tokens, max 4096)")
-    parser.add_argument("--mtp", action=argparse.BooleanOptionalAction, default=None, help="Multi-Token Prediction / speculative decoding. Default: OFF on Apple Silicon Metal (measured ~50%% slower on E4B+gpu, see ISSUES.md); ON for non-Darwin GPU per upstream guidance; OFF for cpu. Override with --mtp / --no-mtp.")
+    parser.add_argument("--mtp", action=argparse.BooleanOptionalAction, default=None, help="Multi-Token Prediction / speculative decoding. Defaults: model-aware on Apple Silicon Metal (ON for gemma-4-E4B-it, OFF otherwise), ON for non-Darwin GPU, OFF for cpu. Override with --mtp / --no-mtp.")
     parser.add_argument("--upgrade", action="store_true", help="Upgrade litert-lm via 'uv tool upgrade litert-lm'")
     try:
         _litert_version = importlib.metadata.version("litert-lm")
@@ -1294,12 +1309,15 @@ Examples:
         print(f"[info] '{selected_model}' is {only}-only; skipping absent encoder backend(s).", file=sys.stderr)
 
     # MTP (speculative decoding) default resolution:
-    #   --mtp / --no-mtp explicit  → honored
-    #   Darwin (Apple Silicon Metal) → OFF (benchmarked ~50% slower on E4B, see ISSUES.md)
-    #   Other GPU                    → ON  (matches upstream "universally recommended on GPU")
-    #   CPU                          → OFF
+    #   --mtp / --no-mtp explicit       → honored
+    #   Darwin GPU + gemma-4-E4B-it     → ON  (measured faster on M2 Pro, litert-lm 0.13.1)
+    #   Darwin GPU + other models       → OFF (E2B tied/slower; current 12B has no draft head)
+    #   Other GPU                       → ON  (matches upstream GPU guidance)
+    #   CPU                             → OFF
     if args.mtp is not None:
         mtp_enabled = args.mtp
+    elif args.backend == "gpu" and platform.system() == "Darwin":
+        mtp_enabled = is_e4b_model_ref(selected_model, model_path)
     elif args.backend == "gpu" and platform.system() != "Darwin":
         mtp_enabled = True
     else:

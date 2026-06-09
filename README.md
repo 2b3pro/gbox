@@ -33,7 +33,7 @@
 - **Context Awareness**: Inject conversation history via JSONL or raw text context via Markdown using the `--context` flag.
 - **Smart Recommendations**: Suggests using the `--high` (4B) model when complex tools (like AppleScript, SQLite, or macOS system automation) are requested.
 - **Flexible Model Selection**: Use the default 2B model, `--high` for 4B, `--model gemma-4-12b` for the larger Gemma 4 12B model, or reference any model imported via `litert-lm import` by its shorthand ID (e.g. `--model qwen3-4b`). Missing built-in Gemma models are imported automatically on first use. gbox auto-detects each bundle's modalities (text/vision/audio) and MTP draft head, so text-only models like Qwen3 just work — no manual backend flags. Inspect any model with `gbox modelinfo <model>`.
-- **Multi-Token Prediction (MTP)**: `--mtp` / `--no-mtp` toggle for LiteRT-LM speculative decoding. Default **off on Apple Silicon Metal** (measured slower — see [ISSUES.md](ISSUES.md)), **on for non-Darwin GPU** per [upstream guidance](https://ai.google.dev/edge/litert-lm/python#mtp), off for CPU.
+- **Multi-Token Prediction (MTP)**: `--mtp` / `--no-mtp` toggle for LiteRT-LM speculative decoding. Defaults are model-aware on Apple Silicon Metal (**on for `gemma-4-E4B-it`, off otherwise**), **on for non-Darwin GPU** per [upstream guidance](https://ai.google.dev/edge/litert-lm/python#mtp), off for CPU.
 - **Unix-Friendly**: Designed for piping and shell automation.
 
 ## Installation
@@ -258,7 +258,7 @@ curl http://localhost:8955/v1/chat/completions \
 | `--vision-backend` | Vision backend (`cpu` or `gpu`). Defaults to `gpu` on Apple Silicon. |
 | `--audio-backend` | Audio backend (`cpu` or `gpu`). Defaults to `cpu`. |
 | `--max-tokens` | KV cache size (default: 4096). |
-| `--mtp` / `--no-mtp` | Toggle Multi-Token Prediction (speculative decoding). Defaults: **off on Apple Silicon Metal** (measured slower), **on for non-Darwin GPU**, off for CPU. See [ISSUES.md](ISSUES.md) for benchmark data. |
+| `--mtp` / `--no-mtp` | Toggle Multi-Token Prediction (speculative decoding). Defaults: model-aware on Apple Silicon Metal (**on for `gemma-4-E4B-it`, off otherwise**), **on for non-Darwin GPU**, off for CPU. See [ISSUES.md](ISSUES.md) for benchmark data. |
 
 ---
 
