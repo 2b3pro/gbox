@@ -8,7 +8,7 @@
 
 ## Why gbox?
 
-- 🆓 **Free forever** — no subscription, no token billing. The models are open-weight and downloaded once.
+- 🆓 **Free forever** — no subscription, no token billing. Built-in Gemma models are open-weight and downloaded once on first use.
 - 🏠 **Fully local & private** — every byte of your prompts, files, screenshots, and audio stays on your machine. Nothing leaves the box.
 - ⚡ **Fast on Apple Silicon** — backed by Google's LiteRT-LM with Metal GPU acceleration, plus an optional warm-server mode that eliminates the model-load penalty.
 - 🧰 **Real tool calling** — the model can read your filesystem, run AppleScript, query SQLite, OCR images, control macOS, search the web, and more — gated by an explicit `--tools` allowlist.
@@ -18,7 +18,8 @@
 ### Built on Google's open AI stack
 
 - **[LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM)** — Google AI Edge's on-device LLM runtime ([overview](https://ai.google.dev/edge/litert)).
-- **[Gemma 4](https://ai.google.dev/gemma)** — Google's multimodal open models designed for edge devices. `gbox` defaults to `gemma-4-E2B-it` and switches to `gemma-4-E4B-it` with `--high`.
+- **[Gemma 4](https://ai.google.dev/gemma)** — Google's multimodal open models designed for edge devices. `gbox` defaults to `gemma-4-E2B-it`, switches to `gemma-4-E4B-it` with `--high`, and can run the larger `gemma-4-12b` model with `--model`.
+  - [Gemma 4 Model Card Comparison](https://ai.google.dev/gemma/docs/core/model_card_4)
 
 ## Features
 
@@ -31,7 +32,7 @@
 - **Modular Tooling**: Enable specific tools or predefined tool sets from a modular `tools/` package.
 - **Context Awareness**: Inject conversation history via JSONL or raw text context via Markdown using the `--context` flag.
 - **Smart Recommendations**: Suggests using the `--high` (4B) model when complex tools (like AppleScript, SQLite, or macOS system automation) are requested.
-- **Bring Your Own Model**: Reference any model imported via `litert-lm import` by its shorthand ID (e.g. `--model qwen3-4b`), or point `--model` at any `.litertlm` file. gbox auto-detects each bundle's modalities (text/vision/audio) and MTP draft head, so text-only models like Qwen3 just work — no manual backend flags. Inspect any model with `gbox modelinfo <model>`.
+- **Flexible Model Selection**: Use the default 2B model, `--high` for 4B, `--model gemma-4-12b` for the larger Gemma 4 12B model, or reference any model imported via `litert-lm import` by its shorthand ID (e.g. `--model qwen3-4b`). Missing built-in Gemma models are imported automatically on first use. gbox auto-detects each bundle's modalities (text/vision/audio) and MTP draft head, so text-only models like Qwen3 just work — no manual backend flags. Inspect any model with `gbox modelinfo <model>`.
 - **Multi-Token Prediction (MTP)**: `--mtp` / `--no-mtp` toggle for LiteRT-LM speculative decoding. Default **off on Apple Silicon Metal** (measured slower — see [ISSUES.md](ISSUES.md)), **on for non-Darwin GPU** per [upstream guidance](https://ai.google.dev/edge/litert-lm/python#mtp), off for CPU.
 - **Unix-Friendly**: Designed for piping and shell automation.
 
@@ -46,6 +47,8 @@ uv pip install pymupdf
 # Recommended for specific tools
 brew install poppler exiftool sox ffmpeg imagemagick
 ```
+
+Built-in Gemma models (`gemma-4-E2B-it`, `gemma-4-E4B-it`, and `gemma-4-12b`) are downloaded automatically the first time you run them. `gbox` delegates the import to `litert-lm import` so the files land in LiteRT-LM's normal model registry.
 
 ## Usage
 
@@ -98,13 +101,19 @@ gbox --tools mac "Switch to dark mode and say 'Good evening'"
 ```
 
 ### Model Selection
-The tool defaults to `gemma-4-E2B-it`.
+The tool defaults to `gemma-4-E2B-it`. Use `--high` for the 4B model, or `--model` when you want a specific model such as Gemma 4 12B.
 ```bash
 # Use the 4B model (Higher reasoning)
 gbox --high --prompt "Explain quantum decoherence."
 
+# Use the 12B model (largest bundled Gemma option)
+gbox --model gemma-4-12b --prompt "Design a robust migration plan."
+
 # Explicitly use the 2B model
 gbox --default --prompt "Who are you?"
+
+# Fail instead of downloading a missing built-in model
+gbox --no-download --model gemma-4-12b --prompt "Hello"
 ```
 
 #### Using imported / custom models
@@ -227,7 +236,8 @@ curl http://localhost:8955/v1/chat/completions \
 
 | Flag | Description |
 |------|-------------|
-| `--model` | Model ID or path: a `--high`/`--default` name, a `litert-lm import` shorthand (e.g. `qwen3-4b`), or any `.litertlm` file. Also usable positionally (`gbox <model> "prompt"`). |
+| `--model` | Model ID or path: a `--high`/`--default` name, `gemma-4-12b`, a `litert-lm import` shorthand (e.g. `qwen3-4b`), or any `.litertlm` file. Also usable positionally (`gbox <model> "prompt"`). |
+| `--no-download` | Disable first-run auto-download for missing built-in Gemma models. |
 | `--prompt` | The user text prompt (or path to a prompt file). |
 | `--image` | Path to an image file. |
 | `--audio` | Path to an audio file. |

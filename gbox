@@ -31,9 +31,11 @@ import tempfile
 import datetime
 import urllib.request
 import urllib.error
+import subprocess
+import shutil
 from contextlib import contextmanager
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 @contextmanager
 def suppress_stderr():
@@ -61,6 +63,34 @@ HIGH_COGNITION_TOOLS = {
     "get_active_browser_info",
     "launchd_create",
     "launchd_service_control"
+}
+
+BUILTIN_MODEL_IMPORTS = {
+    "gemma-4-E2B-it": {
+        "repo": "litert-community/gemma-4-E2B-it-litert-lm",
+        "file": "gemma-4-E2B-it.litertlm",
+        "import_id": "gemma-4-E2B-it",
+    },
+    "gemma-4-E4B-it": {
+        "repo": "litert-community/gemma-4-E4B-it-litert-lm",
+        "file": "gemma-4-E4B-it.litertlm",
+        "import_id": "gemma-4-E4B-it",
+    },
+    "gemma-4-12b": {
+        "repo": "litert-community/gemma-4-12B-it-litert-lm",
+        "file": "gemma-4-12B-it.litertlm",
+        "import_id": "gemma-4-12b",
+    },
+    "gemma4-12b": {
+        "repo": "litert-community/gemma-4-12B-it-litert-lm",
+        "file": "gemma-4-12B-it.litertlm",
+        "import_id": "gemma4-12b",
+    },
+}
+
+MODEL_ALIASES = {
+    "gemma-4-12b": ["gemma-4-12B-it", "gemma4-12b"],
+    "gemma4-12b": ["gemma-4-12B-it", "gemma-4-12b"],
 }
 
 def load_preset(path, requested_tools=None):
@@ -151,7 +181,76 @@ def resolve_model_path(model_ref):
             if os.path.exists(target_ext):
                 return target_ext
 
+    for alias in MODEL_ALIASES.get(model_ref, []):
+        for base in storage_paths:
+            target = os.path.join(base, alias)
+            if os.path.exists(target):
+                return _resolve_litertlm_in_dir(target) or target
+            if not target.endswith(".litertlm"):
+                target_ext = target + ".litertlm"
+                if os.path.exists(target_ext):
+                    return target_ext
+
     return model_ref
+
+def _is_resolved_model_path(model_path):
+    """Return True when a resolved model path points at an actual LiteRT-LM bundle."""
+    return (
+        os.path.isfile(model_path)
+        and model_path.endswith(".litertlm")
+    )
+
+def ensure_model_available(model_ref, auto_download=True):
+    """Resolve a model, importing known bundled Gemma models on first use."""
+    model_path = resolve_model_path(model_ref)
+    if _is_resolved_model_path(model_path):
+        return model_path
+
+    model_import = BUILTIN_MODEL_IMPORTS.get(model_ref)
+    if not model_import:
+        return model_path
+
+    if not auto_download:
+        print(
+            f"Error: model '{model_ref}' is not installed locally. "
+            f"Run: litert-lm import --from-huggingface-repo {model_import['repo']} "
+            f"{model_import['file']} {model_import['import_id']}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    litert_cli = shutil.which("litert-lm")
+    if not litert_cli:
+        print(
+            f"Error: model '{model_ref}' is not installed locally and 'litert-lm' was not found on PATH.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    cmd = [
+        litert_cli,
+        "import",
+        "--from-huggingface-repo",
+        model_import["repo"],
+        model_import["file"],
+        model_import["import_id"],
+    ]
+    print(f"[info] Downloading {model_ref} with litert-lm import...", file=sys.stderr)
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        print(
+            f"Error: failed to download model '{model_ref}'. "
+            f"You can retry manually with: {' '.join(cmd)}",
+            file=sys.stderr,
+        )
+        sys.exit(result.returncode)
+
+    model_path = resolve_model_path(model_import["import_id"])
+    if _is_resolved_model_path(model_path):
+        return model_path
+
+    print(f"Error: imported '{model_ref}', but could not find the .litertlm bundle afterward.", file=sys.stderr)
+    sys.exit(1)
 
 def get_available_models():
     """Returns a list of available models by scanning LiteRT-LM storage paths.
@@ -168,7 +267,7 @@ def get_available_models():
     if env_path:
         storage_paths.insert(0, os.path.expanduser(env_path))
 
-    models = set(["gemma-4-E2B-it", "gemma-4-E4B-it"])
+    models = set(BUILTIN_MODEL_IMPORTS.keys())
     for base in storage_paths:
         if not os.path.isdir(base):
             continue
@@ -700,7 +799,7 @@ def _describe_model_storage():
     if discovered:
         lines.append(f"  Discovered ({len(discovered)}): {', '.join(discovered)}")
 
-    lines.append("  More models: https://huggingface.co/litert-community  (download .litertlm into a search path above)")
+    lines.append("  Built-in Gemma models are downloaded on first use. More models: https://huggingface.co/litert-community")
     return "\n".join(lines) + "\n"
 
 
@@ -770,6 +869,7 @@ Examples:
 
   Pick a specific model (any of these forms):
     gbox --model gemma-4-E4B-it "Why is the sky blue?"
+    gbox --model gemma-4-12b "Design a migration plan."
     gbox --model qwen3-4b "What is gravitronics?"        # shorthand from 'litert-lm import'
     gbox --model ~/.litert-lm/models/my-custom.litertlm "Prompt..."
     gbox gemma-4-E4B-it "Why is the sky blue?"          # positional form also works
@@ -786,7 +886,8 @@ Examples:
     parser.add_argument("prompt_parts", nargs="*", help="Remaining parts of the prompt if first arg was a model")
     parser.add_argument("--default", action="store_true", help="Use gemma-4-E2B-it model (default)")
     parser.add_argument("--high", action="store_true", help="Use gemma-4-E4B-it model")
-    parser.add_argument("--model", help="Model name or path (e.g. gemma-4-E4B-it, or any .litertlm file in a search path). See 'Model storage' section below for search order.")
+    parser.add_argument("--model", help="Model name or path (e.g. gemma-4-E4B-it, gemma-4-12b, or any .litertlm file in a search path). See 'Model storage' section below for search order.")
+    parser.add_argument("--no-download", action="store_true", help="Do not auto-download missing built-in Gemma models.")
     parser.add_argument("--prompt", help="The user prompt (overrides positional prompt)")
     parser.add_argument("--presets", help="Path to a preset.py module. If omitted but --tools is given, the bundled preset.py next to gbox is used automatically.")
     parser.add_argument("--tools", help="Comma-separated tools or sets to filter the preset down to (e.g. 'mac', 'fs,web'). If --presets is omitted, the bundled preset.py is auto-loaded. See 'Available tools' below.")
@@ -1032,7 +1133,7 @@ Examples:
             positional_prompt = " ".join([args.model_or_prompt] + args.prompt_parts)
         else:
             resolved = resolve_model_path(args.model_or_prompt)
-            if os.path.exists(resolved) or args.model_or_prompt in ["gemma-4-E2B-it", "gemma-4-E4B-it"]:
+            if os.path.exists(resolved) or args.model_or_prompt in BUILTIN_MODEL_IMPORTS:
                 selected_model = args.model_or_prompt
                 if args.prompt_parts:
                     positional_prompt = " ".join(args.prompt_parts)
@@ -1180,7 +1281,7 @@ Examples:
         return
 
     # Inference
-    model_path = resolve_model_path(selected_model)
+    model_path = ensure_model_available(selected_model, auto_download=not args.no_download)
     # A text-only bundle (e.g. an imported Qwen3) has no vision/audio encoder;
     # wiring one up makes LiteRT-LM raise NOT_FOUND at conversation creation, so
     # only enable backends the bundle actually carries.
