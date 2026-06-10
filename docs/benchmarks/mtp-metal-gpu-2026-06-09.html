@@ -366,7 +366,7 @@
         </thead>
         <tbody></tbody>
       </table>
-      <p class="note">12B local bundle reports no MTP draft head in <code>gbox modelinfo</code>. The LiteRT-LM benchmark accepted <code>--enable-speculative-decoding true</code>, but the result should be interpreted as "forced flag" rather than confirmed MTP acceleration. In gbox itself, <code>--mtp</code> is auto-disabled for this 12B bundle.</p>
+      <p class="note">The 12B rows were captured against a legacy standalone <code>gemma-4-12B-it.litertlm</code> bundle. Current gbox-friendly 12B resolution prefers the registry <code>gemma4-12b/model.litertlm</code> bundle, which should be benchmarked separately before changing its MTP default.</p>
     </section>
   </main>
 
@@ -424,7 +424,7 @@
       const copy = {
         E2B: "Statistical tie. MTP on was 0.9% slower on decode.",
         E4B: "Only clear win. MTP on was 5.0% faster on decode.",
-        "12B": "No confirmed MTP path. Forced flag was 4.5% slower on decode."
+        "12B": "Legacy standalone bundle. Forced flag was 4.5% slower on decode."
       };
       document.getElementById("summary").innerHTML = models.map(model => {
         const { off, on } = byModel(model);

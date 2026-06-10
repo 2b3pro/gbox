@@ -35,7 +35,7 @@ import subprocess
 import shutil
 from contextlib import contextmanager
 
-__version__ = "0.7.2"
+__version__ = "0.7.3"
 
 @contextmanager
 def suppress_stderr():
@@ -69,17 +69,17 @@ BUILTIN_MODEL_IMPORTS = {
     "gemma-4-E2B-it": {
         "repo": "litert-community/gemma-4-E2B-it-litert-lm",
         "file": "gemma-4-E2B-it.litertlm",
-        "import_id": "gemma-4-E2B-it",
+        "import_id": "gemma4-e2b",
     },
     "gemma-4-E4B-it": {
         "repo": "litert-community/gemma-4-E4B-it-litert-lm",
         "file": "gemma-4-E4B-it.litertlm",
-        "import_id": "gemma-4-E4B-it",
+        "import_id": "gemma4-e4b",
     },
     "gemma-4-12b": {
         "repo": "litert-community/gemma-4-12B-it-litert-lm",
         "file": "gemma-4-12B-it.litertlm",
-        "import_id": "gemma-4-12b",
+        "import_id": "gemma4-12b",
     },
     "gemma4-12b": {
         "repo": "litert-community/gemma-4-12B-it-litert-lm",
@@ -165,11 +165,11 @@ def _resolve_litertlm_in_dir(d):
         pass
     return None
 
-def resolve_model_path(model_ref):
-    """Resolves model reference to an absolute path."""
+def resolve_model_path_with_alias(model_ref):
+    """Resolve model reference and report the registry alias used, if any."""
     if os.path.exists(model_ref):
         ref = os.path.abspath(model_ref)
-        return _resolve_litertlm_in_dir(ref) or ref
+        return _resolve_litertlm_in_dir(ref) or ref, None
 
     storage_paths = [
         os.path.expanduser("~/.litert-lm/models"),
@@ -184,22 +184,26 @@ def resolve_model_path(model_ref):
         for base in storage_paths:
             target = os.path.join(base, alias)
             if os.path.exists(target):
-                return _resolve_litertlm_in_dir(target) or target
+                return _resolve_litertlm_in_dir(target) or target, alias
             if not target.endswith(".litertlm"):
                 target_ext = target + ".litertlm"
                 if os.path.exists(target_ext):
-                    return target_ext
+                    return target_ext, alias
 
     for base in storage_paths:
         target = os.path.join(base, model_ref)
         if os.path.exists(target):
-            return _resolve_litertlm_in_dir(target) or target
+            return _resolve_litertlm_in_dir(target) or target, None
         if not target.endswith(".litertlm"):
             target_ext = target + ".litertlm"
             if os.path.exists(target_ext):
-                return target_ext
+                return target_ext, None
 
-    return model_ref
+    return model_ref, None
+
+def resolve_model_path(model_ref):
+    """Resolves model reference to an absolute path."""
+    return resolve_model_path_with_alias(model_ref)[0]
 
 def _is_resolved_model_path(model_path):
     """Return True when a resolved model path points at an actual LiteRT-LM bundle."""
@@ -365,7 +369,7 @@ def print_model_info(model_ref):
 
     Returns a process exit code (0 ok, 1 if the model can't be resolved).
     """
-    path = resolve_model_path(model_ref)
+    path, alias = resolve_model_path_with_alias(model_ref)
     if not (path.endswith(".litertlm") and os.path.isfile(path)):
         print(f"Error: could not resolve '{model_ref}' to a .litertlm file.", file=sys.stderr)
         print("Check your model storage paths (run 'gbox --help' for search order).", file=sys.stderr)
@@ -379,6 +383,8 @@ def print_model_info(model_ref):
         return f"{n:.1f} PB"
 
     print(f"Model:      {model_ref}")
+    if alias:
+        print(f"Resolved:   {alias}")
     print(f"Path:       {path}")
     print(f"Size:       {_human(os.path.getsize(path))}")
     info = _peek_model(path)
@@ -740,7 +746,17 @@ def try_forward_to_server(args, selected_model, tools, messages, system_msg, con
         return False
 
     # Compatibility check
-    if config.get("model") != selected_model:
+    if resolve_model_path(config.get("model", "")) != resolve_model_path(selected_model):
+        return False
+    if int(config.get("max_tokens", 0) or 0) < int(args.max_tokens):
+        return False
+    if config.get("backend") != args.backend:
+        return False
+    if image_path and config.get("vision_backend") != args.vision_backend:
+        return False
+    if audio_path and config.get("audio_backend") != args.audio_backend:
+        return False
+    if args.mtp is not None and bool(config.get("enable_speculative_decoding", False)) != bool(args.mtp):
         return False
     
     server_tools = set(config.get("tools", []))
@@ -1208,6 +1224,8 @@ Examples:
             print(f"Warning: --tools '{args.tools}' ignored — no --presets given and bundled preset.py not found at {bundled_preset}", file=sys.stderr)
     if args.presets:
         tools, system_msg = load_preset(args.presets, args.tools)
+        if args.server and args.tools and any(name.strip() == "all" for name in args.tools.split(",")):
+            print("[Warning] Starting server with all tools; tool schemas increase context use and expand tool access.", file=sys.stderr)
         active_tool_names = {t.__name__ for t in tools}
         high_tools_in_use = active_tool_names.intersection(HIGH_COGNITION_TOOLS)
         if os.getenv("GBOX_HINTS") and high_tools_in_use and not is_high_requested and selected_model == "gemma-4-E2B-it":

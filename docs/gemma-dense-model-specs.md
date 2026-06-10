@@ -2,7 +2,7 @@
 
 **Date captured:** 2026-06-04
 **Status:** Reference (transcribed from Gemma model documentation)
-**Relevance to gbox:** These are the dense bundles gbox runs on-device. `E2B` is the default (`gbox --default` → `gemma-4-E2B-it`), `E4B` is the high-cognition model (`gbox --high` → `gemma-4-E4B-it`), and `12B Unified` is exposed as `gemma-4-12b` with compatibility aliases for `gemma4-12b` and `gemma-4-12B-it` installs. Missing built-in Gemma bundles are imported on first use via `litert-lm import`. Use `gbox modelinfo <model>` to confirm a local bundle's modalities and MTP draft head.
+**Relevance to gbox:** These are the dense bundles gbox runs on-device. `E2B` is the default (`gbox --default` → `gemma-4-E2B-it`), `E4B` is the high-cognition model (`gbox --high` → `gemma-4-E4B-it`), and `12B Unified` is exposed as `gemma-4-12b`. Built-in friendly names prefer LiteRT-LM registry IDs (`gemma4-e2b`, `gemma4-e4b`, `gemma4-12b`) when present. Missing built-in Gemma bundles are imported on first use via `litert-lm import`. Use `gbox modelinfo <model>` to confirm a local bundle's modalities and MTP draft head.
 
 ## Dense Models
 

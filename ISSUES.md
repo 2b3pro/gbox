@@ -61,7 +61,7 @@ This file tracks known limitations, hardware-specific constraints, and upstream 
   |-------|----------------|---------------|---------|
   | E2B   | 64.30 tok/s | 63.71 tok/s | MTP ~0.9% slower / effectively tied |
   | E4B   | 37.50 tok/s | 39.38 tok/s | MTP ~5.0% faster |
-  | 12B   | 15.20 tok/s | 14.53 tok/s | current local bundle reports no MTP draft head; gbox disables `--mtp` |
+  | 12B   | 15.20 tok/s | 14.53 tok/s | legacy standalone `gemma-4-12B-it.litertlm`; retest registry `gemma4-12b` before defaulting MTP on |
 
 - **Action in gbox:** MTP defaults are now model-aware on Darwin/Metal: **ON for `gemma-4-E4B-it`**, OFF for E2B and other models. Default remains ON for non-Darwin GPU (preserves upstream guidance for Linux CUDA / WebGPU). Override with `--mtp` to force on, `--no-mtp` to force off; bundles without an MTP draft head still auto-disable MTP.
 - **Reproduce:** see `docs/benchmarks/mtp-metal-gpu-2026-06-09.html` for the latest benchmark report.

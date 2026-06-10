@@ -117,7 +117,7 @@ gbox --no-download --model gemma-4-12b --prompt "Hello"
 ```
 
 #### Using imported / custom models
-Models imported with the LiteRT-LM CLI (`litert-lm import <source> <model-id>`) are stored as `~/.litert-lm/models/<model-id>/model.litertlm`. Reference them by their shorthand ID — gbox resolves the registry layout for you:
+Models imported with the LiteRT-LM CLI (`litert-lm import <source> <model-id>`) are stored as `~/.litert-lm/models/<model-id>/model.litertlm`. Reference them by their shorthand ID — gbox resolves the registry layout for you. Built-in friendly names resolve to registry IDs when present (`gemma-4-E2B-it` → `gemma4-e2b`, `gemma-4-E4B-it` → `gemma4-e4b`, `gemma-4-12b` → `gemma4-12b`):
 ```bash
 # Shorthand ID from `litert-lm import` (resolves <id>/model.litertlm)
 gbox --model qwen3-4b "What is gravitronics?"
@@ -258,7 +258,7 @@ curl http://localhost:8955/v1/chat/completions \
 | `--no-server` | Disable automatic server diversion. |
 | `--server` | Server control: `start`, `stop`, `status`, `logs`, `config`, `models`. |
 | `--port` | Port for the inference server (default: 8955). |
-| `--tools` | Comma-separated tools or sets to filter the preset down to (e.g. `mac`, `fs,web`, `all`). If `--presets` is omitted, the bundled `preset.py` next to `gbox` is auto-loaded. |
+| `--tools` | Comma-separated tools or sets to filter the preset down to (e.g. `time`, `clip`, `exec`, `mac`, `fs,web`, `all`). If `--presets` is omitted, the bundled `preset.py` next to `gbox` is auto-loaded. |
 | `--presets` | Path to a `preset.py` module. Optional when `--tools` is given (bundled preset is used). |
 | `--default` | Force `gemma-4-E2B-it`. |
 | `--high` | Force `gemma-4-E4B-it`. |
@@ -269,6 +269,14 @@ curl http://localhost:8955/v1/chat/completions \
 | `--mtp` / `--no-mtp` | Toggle Multi-Token Prediction (speculative decoding). Defaults: model-aware on Apple Silicon Metal (**on for `gemma-4-E4B-it`, off otherwise**), **on for non-Darwin GPU**, off for CPU. See [ISSUES.md](ISSUES.md) for benchmark data. |
 
 ---
+
+## Smoke Test
+
+Run a quick local regression check after changing `gbox`:
+
+```bash
+scripts/smoke.sh
+```
 
 ## Demos
 
