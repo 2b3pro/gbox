@@ -258,7 +258,7 @@ curl http://localhost:8955/v1/chat/completions \
 | `--no-server` | Disable automatic server diversion. |
 | `--server` | Server control: `start`, `stop`, `status`, `logs`, `config`, `models`. |
 | `--port` | Port for the inference server (default: 8955). |
-| `--tools` | Comma-separated tools or sets to filter the preset down to (e.g. `mac`, `fs,web`). If `--presets` is omitted, the bundled `preset.py` next to `gbox` is auto-loaded. |
+| `--tools` | Comma-separated tools or sets to filter the preset down to (e.g. `mac`, `fs,web`, `all`). If `--presets` is omitted, the bundled `preset.py` next to `gbox` is auto-loaded. |
 | `--presets` | Path to a `preset.py` module. Optional when `--tools` is given (bundled preset is used). |
 | `--default` | Force `gemma-4-E2B-it`. |
 | `--high` | Force `gemma-4-E4B-it`. |

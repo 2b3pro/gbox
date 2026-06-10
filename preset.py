@@ -28,6 +28,7 @@ tool_sets = {
     "dev": dev.tools,
     "utils": utils.tools,
     "mac": macos.tools,
+    "all": tools,
     "vision": [media.ocr_image, macos.screenshot, macos.screenshot_selection, macos.capture_screen_text, media.image_metadata, media.media_convert],
     "audio": [media.record_audio, media.media_convert],
 }

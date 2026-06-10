@@ -35,7 +35,7 @@ import subprocess
 import shutil
 from contextlib import contextmanager
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 
 @contextmanager
 def suppress_stderr():
@@ -89,8 +89,10 @@ BUILTIN_MODEL_IMPORTS = {
 }
 
 MODEL_ALIASES = {
-    "gemma-4-12b": ["gemma-4-12B-it", "gemma4-12b"],
-    "gemma4-12b": ["gemma-4-12B-it", "gemma-4-12b"],
+    "gemma-4-E2B-it": ["gemma4-e2b"],
+    "gemma-4-E4B-it": ["gemma4-e4b"],
+    "gemma-4-12b": ["gemma4-12b", "gemma-4-12B-it"],
+    "gemma4-12b": ["gemma-4-12b", "gemma-4-12B-it"],
 }
 
 E4B_MODEL_IDS = {
@@ -178,15 +180,6 @@ def resolve_model_path(model_ref):
     if env_path:
         storage_paths.insert(0, os.path.expanduser(env_path))
 
-    for base in storage_paths:
-        target = os.path.join(base, model_ref)
-        if os.path.exists(target):
-            return _resolve_litertlm_in_dir(target) or target
-        if not target.endswith(".litertlm"):
-            target_ext = target + ".litertlm"
-            if os.path.exists(target_ext):
-                return target_ext
-
     for alias in MODEL_ALIASES.get(model_ref, []):
         for base in storage_paths:
             target = os.path.join(base, alias)
@@ -196,6 +189,15 @@ def resolve_model_path(model_ref):
                 target_ext = target + ".litertlm"
                 if os.path.exists(target_ext):
                     return target_ext
+
+    for base in storage_paths:
+        target = os.path.join(base, model_ref)
+        if os.path.exists(target):
+            return _resolve_litertlm_in_dir(target) or target
+        if not target.endswith(".litertlm"):
+            target_ext = target + ".litertlm"
+            if os.path.exists(target_ext):
+                return target_ext
 
     return model_ref
 
@@ -1199,17 +1201,16 @@ Examples:
     # Load presets — auto-resolve bundled preset.py when --tools is given without --presets
     tools, system_msg = ([], "")
     if args.tools and not args.presets:
-        bundled_preset = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preset.py")
+        bundled_preset = os.path.join(os.path.dirname(os.path.realpath(__file__)), "preset.py")
         if os.path.exists(bundled_preset):
             args.presets = bundled_preset
-            print(f"[info] --tools given without --presets; using bundled preset: {bundled_preset}", file=sys.stderr)
         else:
             print(f"Warning: --tools '{args.tools}' ignored — no --presets given and bundled preset.py not found at {bundled_preset}", file=sys.stderr)
     if args.presets:
         tools, system_msg = load_preset(args.presets, args.tools)
         active_tool_names = {t.__name__ for t in tools}
         high_tools_in_use = active_tool_names.intersection(HIGH_COGNITION_TOOLS)
-        if high_tools_in_use and not is_high_requested and selected_model == "gemma-4-E2B-it":
+        if os.getenv("GBOX_HINTS") and high_tools_in_use and not is_high_requested and selected_model == "gemma-4-E2B-it":
             tools_str = ", ".join(high_tools_in_use)
             print(f"[Recommendation] Using high-cognition tools ({tools_str}).", file=sys.stderr)
             print(f"Consider adding '--high' (gemma-4-E4B-it) for better reasoning.", file=sys.stderr)
@@ -1336,9 +1337,12 @@ Examples:
     backend = litert_lm.Backend.GPU if args.backend == "gpu" else litert_lm.Backend.CPU
     v_backend = (litert_lm.Backend.GPU if args.vision_backend == "gpu" else litert_lm.Backend.CPU) if caps["vision"] else None
     a_backend = (litert_lm.Backend.GPU if args.audio_backend == "gpu" else litert_lm.Backend.CPU) if caps["audio"] else None
-    if not (caps["vision"] and caps["audio"]):
-        only = "+".join(["text"] + (["vision"] if caps["vision"] else []) + (["audio"] if caps["audio"] else []))
-        print(f"[info] '{selected_model}' is {only}-only; skipping absent encoder backend(s).", file=sys.stderr)
+    if image_path and not caps["vision"]:
+        print(f"Error: model '{selected_model}' does not support image input. Choose a vision-capable model.", file=sys.stderr)
+        sys.exit(1)
+    if audio_path and not caps["audio"]:
+        print(f"Error: model '{selected_model}' does not support audio input. Choose an audio-capable model.", file=sys.stderr)
+        sys.exit(1)
 
     # MTP (speculative decoding) default resolution:
     #   --mtp / --no-mtp explicit       → honored
