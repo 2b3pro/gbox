@@ -192,6 +192,14 @@ When you run a standard `gbox` command, it will automatically check if a compati
 
 If the server is incompatible (e.g., you requested `--high` but the server is running the default model), `gbox` will fall back to local execution. Use the `--no-server` flag to force local execution regardless of server status.
 
+Server model, backend, and KV-cache size are startup settings. Do **not** pack them into the API `model` field. Start or restart the server with the desired runtime config:
+
+```bash
+gbox --server restart --model gemma-4-12b --backend gpu --max-tokens 32768
+```
+
+Then send normal OpenAI-style requests with just the model ID, e.g. `"model": "gemma-4-12b"`. The request `model` value is echoed in responses; it does not hot-swap the already-loaded engine. Larger `--max-tokens` values allocate larger KV caches and can substantially increase memory use and startup latency.
+
 ### Control Subcommands
 - **Start**: `gbox --server start` (or simply `gbox --server`) — Daemonizes the process. Refuses to start if another gbox is already on the port (idempotent) or if a non-gbox process holds the port (safety).
 - **Stop**: `gbox --server stop` — Terminates the background process. Falls back to `lsof` port discovery if the pid file is stale or missing.
@@ -257,7 +265,7 @@ curl http://localhost:8955/v1/chat/completions \
 | `--backend` | Engine backend (`cpu` or `gpu`). Defaults to `gpu` on Apple Silicon. |
 | `--vision-backend` | Vision backend (`cpu` or `gpu`). Defaults to `gpu` on Apple Silicon. |
 | `--audio-backend` | Audio backend (`cpu` or `gpu`). Defaults to `cpu`. |
-| `--max-tokens` | KV cache size (default: 4096). |
+| `--max-tokens` | LiteRT-LM KV cache size / maximum context window in tokens (default: 4096; larger values use more memory). |
 | `--mtp` / `--no-mtp` | Toggle Multi-Token Prediction (speculative decoding). Defaults: model-aware on Apple Silicon Metal (**on for `gemma-4-E4B-it`, off otherwise**), **on for non-Darwin GPU**, off for CPU. See [ISSUES.md](ISSUES.md) for benchmark data. |
 
 ---

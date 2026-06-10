@@ -8,7 +8,7 @@
 
 - Each command is a single bash script in [`demo/`](../demo/), with a sibling `systems/<name>.md` system prompt.
 - Symlink-safe `SCRIPT_DIR` resolution at the top so `gbox-<name>` global install works.
-- 4096-token context window — keep inputs trimmed (`head`, truncation, summarize-before-pass when needed).
+- Default 4096-token KV cache — keep demo inputs trimmed (`head`, truncation, summarize-before-pass when needed), or raise `--max-tokens` for models/hardware that can hold a larger cache.
 - Default to E2B; only call `gbox --high ...` when reasoning genuinely benefits (Tier-2 candidates flagged below).
 - Stay opinionated. If a command needs more than ~120 lines of bash it probably belongs as a real Python script, not a demo.
 

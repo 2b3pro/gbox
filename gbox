@@ -442,6 +442,43 @@ def copy_to_clipboard(text):
     except Exception as e:
         print(f"Warning: Failed to copy to clipboard: {e}", file=sys.stderr)
 
+def add_json_instruction(system_msg):
+    """Add a generic JSON-only instruction for --json when no schema is provided."""
+    json_instruction = (
+        "\n\nYou MUST respond with valid JSON only. "
+        "Do not include conversational filler, markdown formatting, or explanation outside the JSON. "
+        'If the user did not request a specific JSON shape, return an object like {"response": ...}.'
+    )
+    return (system_msg or "You are a helpful assistant.") + json_instruction
+
+def format_json_output(raw_text):
+    """Parse model text as JSON and pretty-print it, extracting fenced JSON when needed."""
+    clean_text = raw_text.strip()
+    if clean_text.startswith("```"):
+        lines = clean_text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        clean_text = "\n".join(lines).strip()
+
+    candidates = [clean_text]
+    object_start = clean_text.find("{")
+    object_end = clean_text.rfind("}")
+    if object_start != -1 and object_end > object_start:
+        candidates.append(clean_text[object_start:object_end + 1])
+    array_start = clean_text.find("[")
+    array_end = clean_text.rfind("]")
+    if array_start != -1 and array_end > array_start:
+        candidates.append(clean_text[array_start:array_end + 1])
+
+    for candidate in candidates:
+        try:
+            return json.dumps(json.loads(candidate), indent=2)
+        except Exception:
+            continue
+    return json.dumps({"error": "Failed to parse JSON", "raw": raw_text}, indent=2)
+
 def process_pdf(pdf_bytes):
     """Processes PDF bytes and returns extracted text and a preview image path."""
     text = ""
@@ -762,14 +799,7 @@ def try_forward_to_server(args, selected_model, tools, messages, system_msg, con
 
         final_output = raw_text
         if args.json:
-            clean_text = raw_text.strip()
-            if clean_text.startswith("```"):
-                start, end = clean_text.find("{"), clean_text.rfind("}") + 1
-                if start != -1 and end != 0: clean_text = clean_text[start:end]
-            try:
-                final_output = json.dumps(json.loads(clean_text), indent=2)
-            except:
-                final_output = json.dumps({"error": "Failed to parse JSON", "raw": raw_text}, indent=2)
+            final_output = format_json_output(raw_text)
             print(final_output)
 
         if args.clipboard:
@@ -893,7 +923,7 @@ Examples:
     gbox modelinfo qwen3-4b
 """
     parser = argparse.ArgumentParser(
-        description="gbox - Quick inference tool for LiteRT-LM (context window maxes out at 4096 tokens). Server includes /models endpoint.",
+        description="gbox - Quick inference tool for LiteRT-LM. Server includes /models endpoint.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=examples_block + _describe_model_storage() + _describe_bundled_preset(),
     )
@@ -926,7 +956,7 @@ Examples:
     parser.add_argument("--backend", default=default_backend, choices=["cpu", "gpu"], help=f"Inference backend (default: {default_backend} — gpu on Apple Silicon, cpu elsewhere)")
     parser.add_argument("--vision-backend", default=default_backend, choices=["cpu", "gpu"], help=f"Vision backend (default: {default_backend} — gpu on Apple Silicon, cpu elsewhere)")
     parser.add_argument("--audio-backend", default="cpu", choices=["cpu", "gpu"], help="Audio backend (default: cpu — gpu unsupported upstream, see ISSUES.md)")
-    parser.add_argument("--max-tokens", type=int, default=4096, help="Maximum context window size (input + output tokens, max 4096)")
+    parser.add_argument("--max-tokens", type=int, default=4096, help="LiteRT-LM KV cache size / maximum context window in tokens (default: 4096; larger values use more memory)")
     parser.add_argument("--mtp", action=argparse.BooleanOptionalAction, default=None, help="Multi-Token Prediction / speculative decoding. Defaults: model-aware on Apple Silicon Metal (ON for gemma-4-E4B-it, OFF otherwise), ON for non-Darwin GPU, OFF for cpu. Override with --mtp / --no-mtp.")
     parser.add_argument("--upgrade", action="store_true", help="Upgrade litert-lm via 'uv tool upgrade litert-lm'")
     try:
@@ -1291,6 +1321,8 @@ Examples:
             "Do not include any conversational filler, markdown formatting (like ```json), or explanation outside the JSON object."
         )
         system_msg = (system_msg or "You are a helpful assistant.") + schema_instruction
+    elif args.json:
+        system_msg = add_json_instruction(system_msg)
 
     if try_forward_to_server(args, selected_model, tools, messages, system_msg, context_text, full_prompt, image_path, audio_path):
         return
@@ -1389,14 +1421,7 @@ Examples:
 
             final_output = raw_text
             if args.json:
-                clean_text = raw_text.strip()
-                if clean_text.startswith("```"):
-                    start, end = clean_text.find("{"), clean_text.rfind("}") + 1
-                    if start != -1 and end != 0: clean_text = clean_text[start:end]
-                try:
-                    final_output = json.dumps(json.loads(clean_text), indent=2)
-                except:
-                    final_output = json.dumps({"error": "Failed to parse JSON", "raw": raw_text}, indent=2)
+                final_output = format_json_output(raw_text)
                 print(final_output)
 
             if args.clipboard:

@@ -19,6 +19,6 @@
 
 ## Notes
 
-- **"Effective" vs "with embeddings" parameter counts** — the E2B/E4B "effective" figure excludes the (large, 262K-vocab) embedding tables; the parenthetical is the full count. gbox's `--max-tokens` ceiling (4096) is a KV-cache limit imposed by gbox, *not* the model's native context length (128K–256K above).
+- **"Effective" vs "with embeddings" parameter counts** — the E2B/E4B "effective" figure excludes the (large, 262K-vocab) embedding tables; the parenthetical is the full count. gbox defaults `--max-tokens` to 4096 for local memory safety, but the flag can be raised for larger KV caches when the hardware can hold them; this remains separate from the model's native context length (128K–256K above).
 - **12B Unified shows full Text/Image/Audio modalities but `—` for the separate vision/audio encoder params** — the "Unified" variant integrates the encoders rather than bundling them as the discrete ~150M vision / ~300M audio add-ons used by E2B/E4B. gbox's capability detection (`detect_model_capabilities`) keys off the `tf_lite_vision_encoder` / `tf_lite_audio_encoder_hw` sections present in the `.litertlm`, so verify per-bundle with `modelinfo` rather than assuming from this table.
-- **Local KV-cache reality** — regardless of the 128K/256K native context, gbox caps the window at 4096 tokens (see `CLAUDE.md`) and summarizes overflow via `manage_session_window`.
+- **Local KV-cache reality** — regardless of the 128K/256K native context, usable context is bounded by the `--max-tokens` KV-cache size you start gbox with. Larger values increase memory use; persistent sessions summarize overflow via `manage_session_window`.
